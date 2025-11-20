@@ -18,3 +18,7 @@ npm run build
 ```
 
 The app uses Tailwind CSS classes via the CDN build that is referenced in `index.html`.
+
+## Deploying to Netlify
+
+For production deploys on Netlify, set the build command to `npm run build` and the publish directory to `dist` so the Vite build output is served instead of source files.
