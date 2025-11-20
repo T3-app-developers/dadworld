@@ -850,7 +850,13 @@ export default function HyperKart3D(){
     else setPlatform("Laptop");
   }, []);
   return (
-    <div className="h-screen w-screen bg-gradient-to-b from-slate-900 to-black text-white relative overflow-hidden">
+    <div
+      className="h-screen w-screen bg-gradient-to-b from-slate-900 to-black text-white relative overflow-hidden"
+      style={{
+        background:
+          "radial-gradient(circle at 20% 20%, rgba(79,70,229,0.12), transparent 35%), radial-gradient(circle at 80% 10%, rgba(14,165,233,0.12), transparent 30%), radial-gradient(circle at 50% 80%, rgba(16,185,129,0.08), transparent 35%), #020617",
+      }}
+    >
       <TopBar />
       {screen === "home" && <HomeScreen />}
       {screen === "character" && <CharacterScreen />}
