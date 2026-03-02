@@ -230,7 +230,7 @@ function CityProps({ radius=30 }) {
     for (let i = 0; i < 60; i++) {
       const a = (i / 60) * Math.PI * 2;
       const r = radius + 5 + Math.random() * 15;
-      arr.push({ a, r, h: 6 + Math.random() * 18 });
+      arr.push({ a, r, h: 6 + Math.random() * 18, w: 2 + Math.random() * 2, d: 2 + Math.random() * 2 });
     }
     return arr;
   }, [radius]);
@@ -238,7 +238,7 @@ function CityProps({ radius=30 }) {
     <group>
       {buildings.map((b, i) => (
         <mesh key={i} position={[Math.cos(b.a)*b.r, b.h/2, Math.sin(b.a)*b.r]}>
-          <boxGeometry args={[2 + Math.random()*2, b.h, 2 + Math.random()*2]} />
+          <boxGeometry args={[b.w, b.h, b.d]} />
           <meshStandardMaterial color="#6b7280" metalness={0.4} roughness={0.6} />
         </mesh>
       ))}
@@ -317,7 +317,7 @@ function RingTrack({ inner=12, outer=22, color="#444" }){
       </mesh>
       {/* Start/Finish line */}
       <mesh position={[inner+((outer-inner)/2), 0.01, 0]} rotation={[-Math.PI/2,0,0]}>
-        <planeGeometry args={[3, (outer-inner)]} />
+        <planeGeometry args={[(outer-inner), 1]} />
         <meshBasicMaterial color="white" transparent opacity={0.6} />
       </mesh>
     </group>
@@ -329,7 +329,7 @@ function BoostArcs({ inner=12, outer=22 }){
   const pads = [
     { ang: Math.PI/4, len: Math.PI/10 },
     { ang: Math.PI, len: Math.PI/10 },
-    { ang: (3*Math.PI)/2, len: Math.PI/10 },
+    { ang: -Math.PI/2, len: Math.PI/10 },
   ];
   return (
     <group>
@@ -404,7 +404,7 @@ const Kart = React.forwardRef(function Kart({ color="#29b6f6", accent="#ffffff",
   };
 
   const vel = useRef(0); // forward speed scalar
-  const yaw = useRef(0);
+  const yaw = useRef(Math.PI / 2);
   const pos = useRef(new THREE.Vector3( (12+5), 0.35, 0)); // start on start line
   const lastAngle = useRef(0);
   const checkpoint = useRef(false); // simple half-lap gate
@@ -450,7 +450,7 @@ const Kart = React.forwardRef(function Kart({ color="#29b6f6", accent="#ffffff",
 
     // Boost pads detection (simple angle windows)
     const ang = Math.atan2(pos.current.z, pos.current.x); // -pi..pi
-    const pads = [Math.PI/4, Math.PI, (3*Math.PI)/2];
+    const pads = [Math.PI/4, Math.PI, -Math.PI/2];
     for(const a of pads){
       const diff = Math.abs(normalizeAngle(ang - a));
       const onPad = diff < (Math.PI/12) && Math.abs(r - centerR) < (outerR-innerR)/3;
@@ -478,7 +478,7 @@ const Kart = React.forwardRef(function Kart({ color="#29b6f6", accent="#ffffff",
     // Write to scene
     if(group.current){
       group.current.position.copy(pos.current);
-      group.current.rotation.y = -yaw.current + Math.PI/2; // face forward tangent
+      group.current.rotation.y = -yaw.current - Math.PI/2; // face forward along movement direction
     }
   });
 
