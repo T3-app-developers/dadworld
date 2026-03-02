@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
   color-scheme: dark;
 }
@@ -14,4 +18,12 @@ body {
 
 a {
   color: inherit;
+}
+
+/* Fix mobile Safari 100vh: use dynamic viewport height when supported */
+.h-screen {
+  height: 100dvh;
+}
+.min-h-screen {
+  min-height: 100dvh;
 }
