@@ -593,6 +593,59 @@ function RaceScene({ theme, character, car, platform, onFinish }){
 }
 
 // -----------------------------
+// 3D: Kart preview for selection screens
+// -----------------------------
+function KartModel({ color = "#29b6f6", accent = "#ffffff" }) {
+  return (
+    <group>
+      <mesh position={[0, 0.25, 0]}> <boxGeometry args={[1.6, 0.4, 2.4]} /> <meshStandardMaterial color={color} metalness={0.2} roughness={0.6} /> </mesh>
+      <mesh position={[0, 0.3, -1.2]}> <boxGeometry args={[1.7, 0.3, 0.3]} /> <meshStandardMaterial color={accent} /> </mesh>
+      <mesh position={[0, 0.85, 0.2]}> <sphereGeometry args={[0.35, 24, 24]} /> <meshStandardMaterial color={accent} /> </mesh>
+      {[-0.7, 0.7].map((x, i) => [-0.9, 0.9].map((z, j) => (
+        <mesh key={`${i}-${j}`} position={[x, 0.18, z]}> <torusGeometry args={[0.28, 0.12, 12, 24]} /> <meshStandardMaterial color="#111" /> </mesh>
+      )))}
+    </group>
+  );
+}
+
+function AutoRotate({ children }) {
+  const ref = useRef();
+  useFrame((_, dt) => { if (ref.current) ref.current.rotation.y += dt * 0.5; });
+  return <group ref={ref}>{children}</group>;
+}
+
+function KartShowcase({ color = "#29b6f6", accent = "#ffffff", className = "" }) {
+  return (
+    <div className={`rounded-2xl overflow-hidden bg-white/5 border border-white/10 ${className}`}>
+      <Canvas camera={{ position: [3, 2, 4], fov: 40 }} dpr={[1, 1.5]}>
+        <color attach="background" args={["#0f172a"]} />
+        <ambientLight intensity={0.4} />
+        <directionalLight position={[5, 8, 5]} intensity={1} />
+        <AutoRotate>
+          <KartModel color={color} accent={accent} />
+        </AutoRotate>
+      </Canvas>
+    </div>
+  );
+}
+
+function StepIndicator({ step }) {
+  const steps = ["Character", "Car", "Track"];
+  return (
+    <div className="shrink-0 flex items-center justify-center gap-1 py-3 px-4">
+      {steps.map((s, i) => (
+        <React.Fragment key={s}>
+          {i > 0 && <div className={`h-px w-4 sm:w-8 ${i + 1 <= step ? "bg-white/40" : "bg-white/10"}`} />}
+          <div className={`text-xs font-medium px-2 py-1 rounded-full whitespace-nowrap ${i + 1 === step ? "bg-white/20 text-white" : i + 1 < step ? "text-white/50" : "text-white/30"}`}>
+            {s}
+          </div>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+// -----------------------------
 // UI: Screens & Settings
 // -----------------------------
 function TopBar(){
@@ -625,16 +678,20 @@ function CharacterScreen(){
   const sel = useSafeSelection();
   return (
     <div className="h-full w-full flex flex-col">
-      <div className="p-6 text-xl font-bold">Select Character</div>
-      <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4 px-6 pb-6">
-        {CHARACTERS.map((c)=> (
-          <button key={c.id} onClick={()=> setCharacter(c)} className={`rounded-2xl border px-3 py-4 text-left transition ${sel.character.id===c.id?"border-white bg-white/10":"border-white/20 bg-white/5 hover:bg-white/10"}`}>
-            <div className="h-16 w-full grid place-items-center"><div className="h-10 w-10 rounded-full" style={{background:c.color}} /></div>
-            <div className="font-semibold">{c.name}</div>
-          </button>
-        ))}
+      <StepIndicator step={1} />
+      <div className="flex-1 overflow-y-auto min-h-0 px-4 sm:px-6 pb-4">
+        <KartShowcase color={sel.character.color} className="h-40 sm:h-48 mb-4" />
+        <div className="text-center text-lg font-semibold mb-3">{sel.character.name}</div>
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+          {CHARACTERS.map((c)=> (
+            <button key={c.id} onClick={()=> setCharacter(c)} className={`rounded-2xl border px-2 py-3 text-center transition ${sel.character.id===c.id?"border-white bg-white/10":"border-white/20 bg-white/5 hover:bg-white/10"}`}>
+              <div className="mx-auto h-8 w-8 rounded-full mb-1" style={{background:c.color}} />
+              <div className="text-sm font-medium">{c.name}</div>
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="p-6 border-t border-white/10 flex justify-between">
+      <div className="shrink-0 p-4 border-t border-white/10 flex justify-between">
         <button onClick={()=> setScreen("home")} className="rounded-xl bg-white/10 px-4 py-2">Back</button>
         <button onClick={()=> setScreen("car")} className="rounded-xl bg-indigo-500 px-6 py-2 font-semibold">Next: Car</button>
       </div>
@@ -646,18 +703,24 @@ function CarScreen(){
   const sel = useSafeSelection();
   return (
     <div className="h-full w-full flex flex-col">
-      <div className="p-6 text-xl font-bold">Select Car</div>
-      <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 px-6 pb-6">
-        {CARS.map((c)=> (
-          <button key={c.id} onClick={()=> setCar(c)} className={`rounded-2xl border px-4 py-4 text-left transition ${sel.car.id===c.id?"border-white bg-white/10":"border-white/20 bg-white/5 hover:bg-white/10"}`}>
-            <div className="font-semibold text-lg mb-2">{c.name}</div>
-            <Stat label="Accel" v={c.accel} max={10} />
-            <Stat label="Top" v={c.maxSpeed/4} max={10} />
-            <Stat label="Handling" v={c.handling*10} max={12} />
-          </button>
-        ))}
+      <StepIndicator step={2} />
+      <div className="flex-1 overflow-y-auto min-h-0 px-4 sm:px-6 pb-4">
+        <KartShowcase color={sel.character.color} className="h-40 sm:h-48 mb-4" />
+        <div className="text-center text-lg font-semibold mb-1">{sel.car.name}</div>
+        <div className="max-w-xs mx-auto mb-4">
+          <Stat label="Accel" v={sel.car.accel} max={10} />
+          <Stat label="Top Speed" v={sel.car.maxSpeed/4} max={10} />
+          <Stat label="Handling" v={sel.car.handling*10} max={12} />
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {CARS.map((c)=> (
+            <button key={c.id} onClick={()=> setCar(c)} className={`rounded-2xl border px-3 py-3 text-center transition ${sel.car.id===c.id?"border-white bg-white/10":"border-white/20 bg-white/5 hover:bg-white/10"}`}>
+              <div className="font-semibold">{c.name}</div>
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="p-6 border-t border-white/10 flex justify-between">
+      <div className="shrink-0 p-4 border-t border-white/10 flex justify-between">
         <button onClick={()=> setScreen("character")} className="rounded-xl bg-white/10 px-4 py-2">Back</button>
         <button onClick={()=> setScreen("track")} className="rounded-xl bg-indigo-500 px-6 py-2 font-semibold">Next: Track</button>
       </div>
@@ -683,20 +746,22 @@ function TrackScreen(){
   useEffect(()=> setL(sel.laps), [sel.laps]);
   return (
     <div className="h-full w-full flex flex-col">
-      <div className="p-6 text-xl font-bold">Select Stadium Theme</div>
-      <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-4 px-6 pb-6">
-        {TRACKS.map((t)=> (
-          <button key={t.id} onClick={()=> setTrack(t)} className={`rounded-2xl border px-4 py-4 text-left transition ${sel.track.id===t.id?"border-white bg-white/10":"border-white/20 bg-white/5 hover:bg-white/10"}`}>
-            <div className="font-semibold text-lg mb-2">{t.name}</div>
-            <div className="h-20 w-full rounded-xl" style={{ background: `linear-gradient(135deg, ${t.sky}, ${t.turf})` }} />
-          </button>
-        ))}
+      <StepIndicator step={3} />
+      <div className="flex-1 overflow-y-auto min-h-0 px-4 sm:px-6 pb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+          {TRACKS.map((t)=> (
+            <button key={t.id} onClick={()=> setTrack(t)} className={`rounded-2xl border px-4 py-4 text-left transition ${sel.track.id===t.id?"border-white bg-white/10":"border-white/20 bg-white/5 hover:bg-white/10"}`}>
+              <div className="font-semibold text-lg mb-2">{t.name}</div>
+              <div className="h-20 w-full rounded-xl" style={{ background: `linear-gradient(135deg, ${t.sky}, ${t.turf})` }} />
+            </button>
+          ))}
+        </div>
+        <div className="mb-2">
+          <div className="mb-2 text-white/80">Laps: {laps}</div>
+          <input type="range" min={1} max={7} value={laps} onChange={(e)=>{ setL(+e.target.value); setLaps(+e.target.value); }} className="w-full" />
+        </div>
       </div>
-      <div className="px-6 pb-6">
-        <div className="mb-2 text-white/80">Laps: {laps}</div>
-        <input type="range" min={1} max={7} value={laps} onChange={(e)=>{ setL(+e.target.value); setLaps(+e.target.value); }} className="w-full" />
-      </div>
-      <div className="p-6 border-t border-white/10 flex justify-between">
+      <div className="shrink-0 p-4 border-t border-white/10 flex justify-between">
         <button onClick={()=> setScreen("car")} className="rounded-xl bg-white/10 px-4 py-2">Back</button>
         <button onClick={()=> setScreen("race")} className="rounded-xl bg-green-500 px-6 py-2 font-semibold">Start Race</button>
       </div>
