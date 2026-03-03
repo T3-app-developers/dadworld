@@ -492,7 +492,10 @@ const Kart = React.forwardRef(function Kart({ color="#29b6f6", accent="#ffffff",
       <mesh castShadow position={[0, 0.85, 0.2]}> <sphereGeometry args={[0.35, 24, 24]} /> <meshStandardMaterial color={accent} /> </mesh>
       {/* wheels */}
       {[-0.7,0.7].map((x,i)=> [-0.9,0.9].map((z,j)=> (
-        <mesh key={`${i}-${j}`} position={[x, 0.18, z]}> <torusGeometry args={[0.28, 0.12, 12, 24]} /> <meshStandardMaterial color="#111" /> </mesh>
+        <mesh key={`${i}-${j}`} position={[x, 0.22, z]} rotation={[0, 0, Math.PI/2]}>
+          <cylinderGeometry args={[0.22, 0.22, 0.18, 16]} />
+          <meshStandardMaterial color="#222" roughness={0.9} />
+        </mesh>
       )))}
     </group>
   );
@@ -525,15 +528,123 @@ const useRaceStore = (() => {
 function CameraRig({ targetRef }){
   const { camera } = useThree();
   const offset = useRef(new THREE.Vector3(0, 5, 8));
+  const ready = useRef(false);
   useFrame((state, dt)=>{
     const t = targetRef.current?.position || new THREE.Vector3();
     const behind = new THREE.Vector3(Math.sin(targetRef.current?.rotation?.y || 0), 0, Math.cos(targetRef.current?.rotation?.y || 0));
     const desired = new THREE.Vector3().copy(t).addScaledVector(behind, offset.current.z).add(new THREE.Vector3(0, offset.current.y, 0));
-    camera.position.lerp(desired, 1 - Math.pow(0.001, dt));
+    if (!ready.current) {
+      camera.position.copy(desired);
+      ready.current = true;
+    } else {
+      camera.position.lerp(desired, 1 - Math.pow(0.0001, dt));
+    }
     camera.lookAt(t.x, t.y + 0.5, t.z);
   });
   return null;
 }
+
+// -----------------------------
+// AI opponents
+// -----------------------------
+const AI_RACERS = [
+  { color: "#ef5da8", accent: "#fff", startAngle: Math.PI * 0.4, speed: 0.38 },
+  { color: "#ffe082", accent: "#fff", startAngle: Math.PI * 0.8, speed: 0.42 },
+  { color: "#ff7043", accent: "#fff", startAngle: Math.PI * 1.2, speed: 0.35 },
+  { color: "#8bc34a", accent: "#fff", startAngle: Math.PI * 1.6, speed: 0.40 },
+];
+
+function AIKart({ color, accent="#fff", startAngle, speed, innerR=12, outerR=22 }) {
+  const ref = useRef();
+  const angle = useRef(startAngle);
+  const radius = (innerR + outerR) / 2;
+  const wobble = useRef(Math.random() * 2); // slight speed variation
+
+  useFrame((state, dt) => {
+    // Vary speed slightly over time for natural feel
+    const s = speed * (1 + Math.sin(state.clock.elapsedTime * 0.5 + wobble.current) * 0.08);
+    angle.current += s * dt;
+    if (ref.current) {
+      ref.current.position.set(
+        Math.cos(angle.current) * radius,
+        0.35,
+        Math.sin(angle.current) * radius
+      );
+      ref.current.rotation.y = -angle.current - Math.PI;
+    }
+  });
+
+  return (
+    <group ref={ref}>
+      <KartModel color={color} accent={accent} />
+    </group>
+  );
+}
+
+// -----------------------------
+// Racing music (Web Audio procedural beat)
+// -----------------------------
+const racingMusic = {
+  ctx: null, interval: null, playing: false,
+  start() {
+    if (this.playing) return;
+    try {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch { return; }
+    this.playing = true;
+    const bpm = 140;
+    const beat = 60 / bpm;
+    const schedule = () => {
+      if (!this.playing || !this.ctx) return;
+      const now = this.ctx.currentTime;
+      for (let i = 0; i < 4; i++) {
+        const t = now + i * beat;
+        if (i === 0 || i === 2) this._kick(t);
+        if (i === 1 || i === 3) this._snare(t);
+        this._hihat(t);
+        this._hihat(t + beat * 0.5);
+      }
+      this._bass(now, beat * 2, 80);
+      this._bass(now + beat * 2, beat * 2, 100);
+    };
+    schedule();
+    this.interval = setInterval(schedule, (4 * beat * 1000) - 50);
+  },
+  stop() {
+    this.playing = false;
+    if (this.interval) { clearInterval(this.interval); this.interval = null; }
+    if (this.ctx) { this.ctx.close().catch(() => {}); this.ctx = null; }
+  },
+  _kick(t) {
+    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.type = "sine"; o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(30, t + 0.12);
+    g.gain.setValueAtTime(0.5, t); g.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+    o.connect(g).connect(this.ctx.destination); o.start(t); o.stop(t + 0.15);
+  },
+  _snare(t) {
+    const buf = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.06, this.ctx.sampleRate);
+    const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const n = this.ctx.createBufferSource(); n.buffer = buf;
+    const f = this.ctx.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = 3000;
+    const g = this.ctx.createGain(); g.gain.setValueAtTime(0.25, t); g.gain.exponentialRampToValueAtTime(0.01, t + 0.06);
+    n.connect(f).connect(g).connect(this.ctx.destination); n.start(t); n.stop(t + 0.06);
+  },
+  _hihat(t) {
+    const buf = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.03, this.ctx.sampleRate);
+    const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const n = this.ctx.createBufferSource(); n.buffer = buf;
+    const f = this.ctx.createBiquadFilter(); f.type = "highpass"; f.frequency.value = 8000;
+    const g = this.ctx.createGain(); g.gain.setValueAtTime(0.07, t); g.gain.exponentialRampToValueAtTime(0.01, t + 0.03);
+    n.connect(f).connect(g).connect(this.ctx.destination); n.start(t); n.stop(t + 0.03);
+  },
+  _bass(t, dur, freq) {
+    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    const f = this.ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 200;
+    o.type = "sawtooth"; o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.01, t + dur * 0.9);
+    o.connect(f).connect(g).connect(this.ctx.destination); o.start(t); o.stop(t + dur);
+  },
+};
 
 // -----------------------------
 // Scene wrapper
@@ -550,9 +661,18 @@ function RaceScene({ theme, character, car, platform, onFinish }){
 
   useEffect(()=>{ if(finished && onFinish) onFinish(); }, [finished, onFinish]);
 
+  // Music
+  useEffect(() => {
+    racingMusic.start();
+    return () => racingMusic.stop();
+  }, []);
+
   const bgColor = new THREE.Color(theme?.sky || "#222");
   const fogColor = new THREE.Color(theme?.fog || "#333");
   const hemiGround = new THREE.Color(theme?.turf || "#1b5e20");
+
+  // Filter out AI racers that match player's color
+  const aiRacers = AI_RACERS.filter(a => a.color !== character.color);
 
   return (
     <div className="relative h-full w-full">
@@ -571,17 +691,23 @@ function RaceScene({ theme, character, car, platform, onFinish }){
         {theme.theme === "city" && <CityProps />}
         {theme.theme === "west" && <WestProps />}
 
-        {/* Kart */}
+        {/* Player Kart */}
         <Kart ref={kartRef} color={character.color} accent={"#fff"} controlRef={controlRef} carStats={car} />
         <CameraRig targetRef={kartRef} />
+
+        {/* AI opponents */}
+        {aiRacers.map((ai, i) => (
+          <AIKart key={i} color={ai.color} accent={ai.accent} startAngle={ai.startAngle} speed={ai.speed} />
+        ))}
 
         {/* Sky detail */}
         {theme.theme !== "classic" && <StarsField count={1000} radius={120} />}
       </Canvas>
 
-      <div className="pointer-events-none absolute top-4 left-4 text-sm font-medium bg-black/30 rounded-xl px-4 py-2 backdrop-blur border border-white/10">
-        <div className="text-xs uppercase tracking-wider text-white/80">Lap</div>
-        <div className="text-lg">{currentLap} / {totalLaps}</div>
+      {/* Lap counter - larger and more prominent */}
+      <div className="pointer-events-none absolute top-4 left-1/2 -translate-x-1/2 text-center bg-black/50 rounded-2xl px-6 py-3 backdrop-blur-md border border-white/20">
+        <div className="text-xs uppercase tracking-widest text-white/70 mb-1">Lap</div>
+        <div className="text-2xl font-bold tabular-nums">{Math.min(currentLap, totalLaps)} <span className="text-white/50">/</span> {totalLaps}</div>
       </div>
 
       {/* Touch controls overlay */}
@@ -602,7 +728,10 @@ function KartModel({ color = "#29b6f6", accent = "#ffffff" }) {
       <mesh position={[0, 0.3, -1.2]}> <boxGeometry args={[1.7, 0.3, 0.3]} /> <meshStandardMaterial color={accent} /> </mesh>
       <mesh position={[0, 0.85, 0.2]}> <sphereGeometry args={[0.35, 24, 24]} /> <meshStandardMaterial color={accent} /> </mesh>
       {[-0.7, 0.7].map((x, i) => [-0.9, 0.9].map((z, j) => (
-        <mesh key={`${i}-${j}`} position={[x, 0.18, z]}> <torusGeometry args={[0.28, 0.12, 12, 24]} /> <meshStandardMaterial color="#111" /> </mesh>
+        <mesh key={`${i}-${j}`} position={[x, 0.22, z]} rotation={[0, 0, Math.PI/2]}>
+          <cylinderGeometry args={[0.22, 0.22, 0.18, 16]} />
+          <meshStandardMaterial color="#222" roughness={0.9} />
+        </mesh>
       )))}
     </group>
   );
@@ -629,6 +758,20 @@ function KartShowcase({ color = "#29b6f6", accent = "#ffffff", className = "" })
   );
 }
 
+function TrackPreview({ track }) {
+  return (
+    <div className="h-28 rounded-xl overflow-hidden">
+      <Canvas camera={{ position: [0, 35, 18], fov: 40 }} dpr={[1, 1.5]}>
+        <color attach="background" args={[track.sky]} />
+        <ambientLight intensity={0.6} />
+        <directionalLight position={[10, 20, 10]} intensity={0.8} />
+        <RingTrack inner={12} outer={22} />
+        <BoostArcs inner={12} outer={22} />
+      </Canvas>
+    </div>
+  );
+}
+
 function StepIndicator({ step }) {
   const steps = ["Character", "Car", "Track"];
   return (
@@ -649,11 +792,12 @@ function StepIndicator({ step }) {
 // UI: Screens & Settings
 // -----------------------------
 function TopBar(){
-  const { showSettings } = useSettings();
   const screen = useScreen();
+  // Only show on home and race screens to avoid overlapping step indicators
+  if (screen !== "home" && screen !== "race") return null;
   return (
-    <div className="pointer-events-none absolute top-0 left-0 right-0 flex items-center justify-between p-4">
-      <div className="pointer-events-auto select-none text-sm tracking-wide uppercase text-white/70">{screen === "race" ? "HyperKart — Race" : "HyperKart 3D"}</div>
+    <div className="pointer-events-none absolute top-0 left-0 right-0 flex items-center justify-between p-4 z-10">
+      <div className="pointer-events-auto select-none text-sm tracking-wide uppercase text-white/70">{screen === "race" ? "" : "HyperKart 3D"}</div>
       <button onClick={()=> setShowSettings(true)} className="pointer-events-auto rounded-xl bg-white/10 border border-white/20 px-4 py-2 text-sm hover:bg-white/20 transition">Settings</button>
     </div>
   );
@@ -752,7 +896,7 @@ function TrackScreen(){
           {TRACKS.map((t)=> (
             <button key={t.id} onClick={()=> setTrack(t)} className={`rounded-2xl border px-4 py-4 text-left transition ${sel.track.id===t.id?"border-white bg-white/10":"border-white/20 bg-white/5 hover:bg-white/10"}`}>
               <div className="font-semibold text-lg mb-2">{t.name}</div>
-              <div className="h-20 w-full rounded-xl" style={{ background: `linear-gradient(135deg, ${t.sky}, ${t.turf})` }} />
+              <TrackPreview track={t} />
             </button>
           ))}
         </div>
@@ -929,10 +1073,6 @@ export default function HyperKart3D(){
       {screen === "track" && <TrackScreen />}
       {screen === "race" && <RaceScreen />}
       <SettingsModal />
-      <DevTestOverlay />
-
-      {/* Footer help */}
-      <div id="howto" className="pointer-events-none absolute bottom-3 left-0 right-0 text-center text-white/50 text-xs">HyperKart is a demo. Expect arcade physics, ring tracks, lap counter, and boost pads. Build AI rivals, power-ups, and networked multiplayer as next steps.</div>
     </div>
   );
 }
