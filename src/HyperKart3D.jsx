@@ -55,8 +55,8 @@ const TRACKS = [
     trackWidth: 10,
     envPreset: "park",
     waypoints: [
-      [0,-35],[18,-32],[32,-20],[38,0],[32,18],[18,30],[0,34],
-      [-14,30],[-24,22],[-20,14],[-28,8],[-38,0],[-32,-18],[-18,-32],
+      [-18,-32],[-32,-18],[-38,0],[-28,8],[-20,14],[-24,22],[-14,30],
+      [0,34],[18,30],[32,18],[38,0],[32,-20],[18,-32],[0,-35],
     ],
     boostTs: [0.15, 0.5, 0.8],
   },
@@ -72,8 +72,8 @@ const TRACKS = [
     trackWidth: 9,
     envPreset: "night",
     waypoints: [
-      [15,25],[-15,25],[-15,10],[-30,10],[-30,-10],
-      [-15,-10],[-15,-25],[15,-25],[15,-10],[30,-10],[30,10],[15,10],
+      [15,10],[30,10],[30,-10],[15,-10],[15,-25],[-15,-25],
+      [-15,-10],[-30,-10],[-30,10],[-15,10],[-15,25],[15,25],
     ],
     boostTs: [0.12, 0.45, 0.78],
   },
@@ -220,6 +220,7 @@ const useStore = (() => {
     // runtime
     paused: false,
     showSettings: false,
+    musicEnabled: true,
   };
   const setState = (partial) => {
     Object.assign(state, typeof partial === "function" ? partial(state) : partial);
@@ -257,6 +258,11 @@ const setPlatform = (p) => useStore.setState({ platform: p });
 const useSettings = () => useStore.useHook((s) => ({ showSettings: s.showSettings, paused: s.paused }));
 const setShowSettings = (v) => useStore.setState({ showSettings: v });
 const setPaused = (v) => useStore.setState({ paused: v });
+const useMusicEnabled = () => useStore.useHook((s) => s.musicEnabled);
+const setMusicEnabled = (v) => {
+  useStore.setState({ musicEnabled: v });
+  if (v) racingMusic.start(); else racingMusic.stop();
+};
 
 // --- Safe selection helpers (fix for undefined destructuring) ---
 function makeSafeSelection(sel){
@@ -554,7 +560,7 @@ const Kart = React.forwardRef(function Kart({ color="#29b6f6", accent="#ffffff",
       // Enter or continue drift
       if (!drifting.current) {
         drifting.current = true;
-        driftDir.current = controls.left ? 1 : -1;
+        driftDir.current = controls.left ? -1 : 1;
         driftTime.current = 0;
       }
       const driftSteer = steerRate * 1.4;
@@ -571,8 +577,8 @@ const Kart = React.forwardRef(function Kart({ color="#29b6f6", accent="#ffffff",
       driftTime.current = 0;
 
       // Normal steering
-      if (controls.left) yaw.current += steerRate * dt;
-      if (controls.right) yaw.current -= steerRate * dt;
+      if (controls.left) yaw.current -= steerRate * dt;
+      if (controls.right) yaw.current += steerRate * dt;
     }
 
     // --- Acceleration (ease-in: stronger at low speed) ---
@@ -910,10 +916,10 @@ function CameraRig({ targetRef }){
 // AI opponents
 // -----------------------------
 const AI_RACERS = [
-  { color: "#ef5da8", accent: "#fff", startT: 0.08, speed: 24, bodyType: "glider", offset: -1.5 },
-  { color: "#ffe082", accent: "#fff", startT: 0.16, speed: 26, bodyType: "torque", offset: 1.5 },
-  { color: "#ff7043", accent: "#fff", startT: 0.24, speed: 22, bodyType: "bulldog", offset: -0.5 },
-  { color: "#8bc34a", accent: "#fff", startT: 0.32, speed: 25, bodyType: "sprinter", offset: 0.5 },
+  { color: "#ef5da8", accent: "#fff", startT: 0.08, speed: 23, bodyType: "glider", offset: -1.5 },
+  { color: "#ffe082", accent: "#fff", startT: 0.16, speed: 28, bodyType: "torque", offset: 1.5 },
+  { color: "#ff7043", accent: "#fff", startT: 0.24, speed: 20, bodyType: "bulldog", offset: -0.5 },
+  { color: "#8bc34a", accent: "#fff", startT: 0.32, speed: 26, bodyType: "sprinter", offset: 0.5 },
 ];
 
 function AIKart({ color, accent="#fff", startT, speed, bodyType, offset=0, curve, trackWidth, playerProgressRef }) {
@@ -940,8 +946,10 @@ function AIKart({ color, accent="#fff", startT, speed, bodyType, offset=0, curve
     const aiProgress = (lap.current - 1) + progress.current;
     const gap = aiProgress - playerProgress;
     let rubberBand = 1.0;
-    if (gap > 0.3) rubberBand = 0.85;
-    else if (gap < -0.3) rubberBand = 1.15;
+    if (gap > 0.5) rubberBand = 0.65;
+    else if (gap > 0.2) rubberBand = 0.78;
+    else if (gap < -0.5) rubberBand = 1.3;
+    else if (gap < -0.2) rubberBand = 1.18;
 
     // Curvature-based speed: slow in corners
     const t1 = progress.current;
@@ -949,11 +957,17 @@ function AIKart({ color, accent="#fff", startT, speed, bodyType, offset=0, curve
     const tang1 = curve.getTangentAt(t1);
     const tang2 = curve.getTangentAt(t2);
     const curvature = tang1.distanceTo(tang2) * 100;
-    const cornerFactor = 1.0 / (1 + curvature * 2);
+    const cornerFactor = 1.0 / (1 + curvature * 2.5);
 
     // Speed with wobble
-    const wobbleSpeed = 1 + Math.sin(state.clock.elapsedTime * 0.7 + wobble.current) * 0.06;
-    const actualSpeed = speed * rubberBand * cornerFactor * wobbleSpeed;
+    const wobbleSpeed = 1 + Math.sin(state.clock.elapsedTime * 0.7 + wobble.current) * 0.08;
+
+    // Random brief mistakes (slow down for ~0.3s every 5-8 seconds)
+    const mistakeCycle = 5.5 + wobble.current * 0.8; // varies per AI
+    const timeMod = state.clock.elapsedTime % mistakeCycle;
+    const mistakeFactor = (timeMod < 0.3) ? 0.55 : 1.0;
+
+    const actualSpeed = speed * rubberBand * cornerFactor * wobbleSpeed * mistakeFactor;
     const tDelta = (actualSpeed * dt) / curveLen;
 
     prevT.current = progress.current;
@@ -969,7 +983,9 @@ function AIKart({ color, accent="#fff", startT, speed, bodyType, offset=0, curve
     const tang = curve.getTangentAt(progress.current);
     const nx = -tang.z, nz = tang.x;
     const len = Math.hypot(nx, nz) || 1;
-    const sideOff = offset + Math.sin(state.clock.elapsedTime * 0.3 + wobble.current) * 1.0;
+    // Dynamic lane changes — swerve to avoid nearby AI / overtake
+    const overtakeOff = Math.sin(state.clock.elapsedTime * 0.5 + wobble.current * 2) * 2.0;
+    const sideOff = offset + Math.sin(state.clock.elapsedTime * 0.3 + wobble.current) * 1.0 + overtakeOff * 0.4;
     const clampedOff = clamp(sideOff, -trackWidth / 2 + 1, trackWidth / 2 - 1);
 
     if (ref.current) {
@@ -1151,7 +1167,7 @@ function RaceScene({ theme, character, car, platform, onFinish }){
   useEffect(() => { if(finished && onFinish) onFinish(); }, [finished, onFinish]);
 
   useEffect(() => {
-    racingMusic.start();
+    if (useStore.get().musicEnabled) racingMusic.start();
     return () => racingMusic.stop();
   }, []);
 
@@ -1316,12 +1332,20 @@ function StepIndicator({ step }) {
 // -----------------------------
 function TopBar(){
   const screen = useScreen();
+  const musicEnabled = useMusicEnabled();
   // Only show on home and race screens to avoid overlapping step indicators
   if (screen !== "home" && screen !== "race") return null;
   return (
     <div className="pointer-events-none absolute top-0 left-0 right-0 flex items-center justify-between p-4 z-10">
       <div className="pointer-events-auto select-none text-sm tracking-wide uppercase text-white/70">{screen === "race" ? "" : "HyperKart 3D"}</div>
-      <button onClick={()=> setShowSettings(true)} className="pointer-events-auto rounded-xl bg-white/10 border border-white/20 px-4 py-2 text-sm hover:bg-white/20 transition">Settings</button>
+      <div className="flex items-center gap-2">
+        {screen === "race" && (
+          <button onClick={()=> setMusicEnabled(!musicEnabled)} className="pointer-events-auto rounded-xl bg-white/10 border border-white/20 px-3 py-2 text-sm hover:bg-white/20 transition" title={musicEnabled ? "Mute music" : "Unmute music"}>
+            {musicEnabled ? "\u{1F50A}" : "\u{1F507}"}
+          </button>
+        )}
+        <button onClick={()=> setShowSettings(true)} className="pointer-events-auto rounded-xl bg-white/10 border border-white/20 px-4 py-2 text-sm hover:bg-white/20 transition">Settings</button>
+      </div>
     </div>
   );
 }
@@ -1334,8 +1358,65 @@ function HomeScreen(){
         <p className="text-white/80 mb-6">Arcade racing in a roaring stadium. Pick your racer, tune your kart, choose a vibe, and punch the gas. Built for Laptop, iPad, and iPhone—controls adapt on the fly.</p>
         <div className="flex items-center justify-center gap-3">
           <button onClick={()=> setScreen("character")} className="rounded-2xl bg-indigo-500 hover:bg-indigo-400 px-6 py-3 font-semibold">Start</button>
-          <a href="#howto" className="rounded-2xl bg-white/10 border border-white/20 px-6 py-3">How to Play</a>
+          <button onClick={()=> setScreen("howto")} className="rounded-2xl bg-white/10 border border-white/20 px-6 py-3">How to Play</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function HowToPlayScreen(){
+  return (
+    <div className="h-full w-full flex flex-col">
+      <div className="flex-1 overflow-y-auto min-h-0 px-4 sm:px-6 pb-4 pt-12">
+        <h2 className="text-3xl font-extrabold text-center mb-6">How to Play</h2>
+        <div className="max-w-lg mx-auto space-y-6">
+          <div>
+            <h3 className="text-lg font-bold mb-2 text-indigo-300">Objective</h3>
+            <p className="text-white/80">Complete all laps and finish in 1st place! Race against 4 AI opponents across unique tracks.</p>
+          </div>
+          <div>
+            <h3 className="text-lg font-bold mb-2 text-indigo-300">Keyboard Controls</h3>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="bg-white/5 rounded-xl p-3 border border-white/10">
+                <div className="font-semibold text-white mb-1">W / Arrow Up</div>
+                <div className="text-white/60">Accelerate</div>
+              </div>
+              <div className="bg-white/5 rounded-xl p-3 border border-white/10">
+                <div className="font-semibold text-white mb-1">S / Arrow Down</div>
+                <div className="text-white/60">Brake / Reverse</div>
+              </div>
+              <div className="bg-white/5 rounded-xl p-3 border border-white/10">
+                <div className="font-semibold text-white mb-1">A / Arrow Left</div>
+                <div className="text-white/60">Steer Left</div>
+              </div>
+              <div className="bg-white/5 rounded-xl p-3 border border-white/10">
+                <div className="font-semibold text-white mb-1">D / Arrow Right</div>
+                <div className="text-white/60">Steer Right</div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <h3 className="text-lg font-bold mb-2 text-indigo-300">Drift Boost</h3>
+            <p className="text-white/80">Hold <span className="font-semibold text-white">Brake + Steer</span> while moving fast to enter a drift. Release to get a speed boost! The longer you drift, the bigger the boost.</p>
+          </div>
+          <div>
+            <h3 className="text-lg font-bold mb-2 text-indigo-300">Tips</h3>
+            <ul className="list-disc list-inside text-white/80 space-y-1">
+              <li>Stay on the track — going off-road pushes you back and slows you down</li>
+              <li>Use drifts on corners for massive speed boosts</li>
+              <li>Hit boost pads on the track for extra speed</li>
+              <li>Each car has different stats — experiment to find your favorite</li>
+            </ul>
+          </div>
+          <div>
+            <h3 className="text-lg font-bold mb-2 text-indigo-300">Touch Controls</h3>
+            <p className="text-white/80">On iPad/iPhone, on-screen buttons appear for steering, acceleration, and braking.</p>
+          </div>
+        </div>
+      </div>
+      <div className="shrink-0 p-4 border-t border-white/10 flex justify-center">
+        <button onClick={()=> setScreen("home")} className="rounded-xl bg-indigo-500 px-6 py-2 font-semibold">Back to Menu</button>
       </div>
     </div>
   );
@@ -1437,6 +1518,96 @@ function TrackScreen(){
   );
 }
 
+// Confetti particle component for win screen
+function Confetti() {
+  const pieces = useRef(
+    Array.from({ length: 50 }, (_, i) => ({
+      id: i,
+      x: Math.random() * 100,
+      delay: Math.random() * 2,
+      duration: 2 + Math.random() * 2,
+      color: ["#ffd700", "#ff6b6b", "#4ecdc4", "#45b7d1", "#f9ca24", "#ff9ff3", "#54a0ff"][i % 7],
+      size: 6 + Math.random() * 8,
+      drift: -20 + Math.random() * 40,
+    }))
+  ).current;
+  return (
+    <div className="absolute inset-0 pointer-events-none overflow-hidden">
+      {pieces.map((p) => (
+        <div
+          key={p.id}
+          className="absolute"
+          style={{
+            left: `${p.x}%`,
+            top: "-20px",
+            width: `${p.size}px`,
+            height: `${p.size}px`,
+            background: p.color,
+            borderRadius: p.size > 10 ? "50%" : "2px",
+            animation: `confettiFall ${p.duration}s ${p.delay}s ease-in infinite`,
+            transform: `rotate(${Math.random() * 360}deg)`,
+          }}
+        />
+      ))}
+      <style>{`
+        @keyframes confettiFall {
+          0% { transform: translateY(0) translateX(0) rotate(0deg); opacity: 1; }
+          100% { transform: translateY(100vh) translateX(40px) rotate(720deg); opacity: 0; }
+        }
+        @keyframes pulseGlow {
+          0%, 100% { text-shadow: 0 0 20px rgba(255,215,0,0.8), 0 0 40px rgba(255,215,0,0.4); }
+          50% { text-shadow: 0 0 40px rgba(255,215,0,1), 0 0 80px rgba(255,215,0,0.6), 0 0 120px rgba(255,215,0,0.3); }
+        }
+        @keyframes slideUp {
+          0% { transform: translateY(40px); opacity: 0; }
+          100% { transform: translateY(0); opacity: 1; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function FinishScreen({ position }) {
+  const isWinner = position === 1;
+  const isPodium = position <= 3;
+  const posText = position === 1 ? "1st" : position === 2 ? "2nd" : position === 3 ? "3rd" : `${position}th`;
+  const borderColor = isWinner ? "border-yellow-400/60" : isPodium ? "border-white/30" : "border-white/20";
+  const bgGrad = isWinner
+    ? "bg-gradient-to-b from-yellow-900/70 via-black/70 to-black/80"
+    : isPodium
+    ? "bg-gradient-to-b from-slate-700/70 via-black/70 to-black/80"
+    : "bg-black/70";
+
+  return (
+    <div className="absolute inset-0 grid place-items-center pointer-events-none z-10">
+      {isWinner && <Confetti />}
+      <div
+        className={`pointer-events-auto ${bgGrad} border ${borderColor} rounded-2xl p-8 text-center max-w-sm mx-4`}
+        style={{ animation: "slideUp 0.5s ease-out" }}
+      >
+        {isWinner && <div className="text-6xl mb-2">🏆</div>}
+        {position === 2 && <div className="text-5xl mb-2">🥈</div>}
+        {position === 3 && <div className="text-5xl mb-2">🥉</div>}
+        {position > 3 && <div className="text-5xl mb-2">🏁</div>}
+        <div
+          className={`text-5xl font-black mb-1 ${isWinner ? "text-yellow-300" : isPodium ? "text-white" : "text-white/90"}`}
+          style={isWinner ? { animation: "pulseGlow 2s ease-in-out infinite" } : {}}
+        >
+          {posText} Place!
+        </div>
+        <div className={`text-lg mb-6 ${isWinner ? "text-yellow-100/90" : "text-white/70"}`}>
+          {isWinner ? "You won the race!" : isPodium ? "Great race! So close!" : "Better luck next time!"}
+        </div>
+        <div className="flex gap-3 justify-center flex-wrap">
+          <button onClick={() => setScreen("track")} className="rounded-xl bg-white/10 border border-white/20 px-4 py-2 hover:bg-white/20 transition">Change Track</button>
+          <button onClick={() => setScreen("race")} className={`rounded-xl px-5 py-2 font-semibold transition ${isWinner ? "bg-yellow-500 hover:bg-yellow-400 text-black" : "bg-indigo-500 hover:bg-indigo-400"}`}>Race Again</button>
+          <button onClick={() => setScreen("home")} className="rounded-xl bg-white/10 border border-white/20 px-4 py-2 hover:bg-white/20 transition">Main Menu</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RaceScreen(){
   const { character, car, track, laps } = useSafeSelection();
   const platform = usePlatform();
@@ -1445,19 +1616,7 @@ function RaceScreen(){
   return (
     <div className="h-full w-full">
       <RaceScene theme={track || TRACKS[0]} character={character || CHARACTERS[0]} car={car || CARS[0]} platform={platform} onFinish={()=> setFinished(true)} />
-      {finished && (
-        <div className="absolute inset-0 grid place-items-center pointer-events-none">
-          <div className="pointer-events-auto bg-black/60 border border-white/20 rounded-2xl p-8 text-center">
-            <div className="text-4xl font-black mb-2">{liveRace.position === 1 ? "1st Place!" : liveRace.position === 2 ? "2nd Place!" : liveRace.position === 3 ? "3rd Place!" : `${liveRace.position}th Place`}</div>
-            <div className="text-white/80 mb-4">{liveRace.position === 1 ? "You won the race!" : "Better luck next time!"}</div>
-            <div className="flex gap-3 justify-center">
-              <button onClick={()=> setScreen("track")} className="rounded-xl bg-white/10 px-4 py-2">Change Track</button>
-              <button onClick={()=> setScreen("race")} className="rounded-xl bg-indigo-500 px-4 py-2">Race Again</button>
-              <button onClick={()=> setScreen("home")} className="rounded-xl bg-white/10 px-4 py-2">Main Menu</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {finished && <FinishScreen position={liveRace.position} />}
     </div>
   );
 }
@@ -1592,6 +1751,7 @@ export default function HyperKart3D(){
     >
       <TopBar />
       {screen === "home" && <HomeScreen />}
+      {screen === "howto" && <HowToPlayScreen />}
       {screen === "character" && <CharacterScreen />}
       {screen === "car" && <CarScreen />}
       {screen === "track" && <TrackScreen />}
