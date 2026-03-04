@@ -1,7 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback, Suspense } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { Environment } from "@react-three/drei";
+import { Environment as DreiEnvironment } from "@react-three/drei";
+
+function SafeEnvironment(props) {
+  return <Suspense fallback={null}><DreiEnvironment {...props} /></Suspense>;
+}
 
 /*****************************
  * HyperKart 3D — single-file demo (patched)
@@ -47,6 +51,7 @@ const TRACKS = [
     fog: "#a6d5f7",
     seatColor: "#334155",
     turf: "#2e7d32",
+    roadColor: "#555555",
     trackWidth: 10,
     envPreset: "park",
     waypoints: [
@@ -62,7 +67,8 @@ const TRACKS = [
     sky: "#1a1a2e",
     fog: "#16213e",
     seatColor: "#1f2937",
-    turf: "#1b5e20",
+    turf: "#1a1a2e",
+    roadColor: "#222233",
     trackWidth: 9,
     envPreset: "night",
     waypoints: [
@@ -78,7 +84,8 @@ const TRACKS = [
     sky: "#ffcc80",
     fog: "#ffc080",
     seatColor: "#5d4037",
-    turf: "#8d6e63",
+    turf: "#c2956a",
+    roadColor: "#8B5A2B",
     trackWidth: 11,
     envPreset: "sunset",
     waypoints: [
@@ -315,11 +322,11 @@ function TouchPad({ onChange }) {
 // -----------------------------
 // Old Stadium/CityProps/WestProps removed — replaced by ClassicProps, CityNeonProps, WestRockProps
 
-function TrackRoad({ curve, trackWidth }) {
+function TrackRoad({ curve, trackWidth, roadColor = "#555" }) {
   const geo = useMemo(() => createRoadGeometry(curve, trackWidth), [curve, trackWidth]);
   return (
     <mesh geometry={geo}>
-      <meshStandardMaterial color="#444" metalness={0.1} roughness={0.85} side={THREE.DoubleSide} />
+      <meshStandardMaterial color={roadColor} metalness={0.1} roughness={0.85} side={THREE.DoubleSide} />
     </mesh>
   );
 }
@@ -701,112 +708,149 @@ function KartBody({ bodyType, color = "#29b6f6", accent = "#fff" }) {
 }
 
 function SprinterBody({ color, accent }) {
+  // LOW SLEEK RACER — very flat, long, streamlined wedge shape
   return (
     <group>
-      {/* Low wedge chassis */}
-      <mesh castShadow position={[0, 0.2, 0]}><boxGeometry args={[1.4, 0.25, 2.4]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
-      {/* Tapered nose */}
-      <mesh castShadow position={[0, 0.2, -1.3]}><boxGeometry args={[0.9, 0.15, 0.5]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
-      {/* Cockpit windshield */}
-      <mesh castShadow position={[0, 0.4, 0.1]}><boxGeometry args={[0.8, 0.2, 0.6]} /><meshStandardMaterial {...darkGlass} /></mesh>
-      {/* Driver head */}
-      <mesh castShadow position={[0, 0.65, 0.3]}><sphereGeometry args={[0.25, 16, 16]} /><meshStandardMaterial color={accent} /></mesh>
-      {/* Rear fin */}
-      <mesh castShadow position={[0, 0.45, 1.1]}><boxGeometry args={[0.05, 0.35, 0.5]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
-      {/* Wheels — low profile */}
-      <Wheel x={-0.65} z={-0.85} r={0.18} w={0.16} />
-      <Wheel x={0.65} z={-0.85} r={0.18} w={0.16} />
-      <Wheel x={-0.65} z={0.85} r={0.18} w={0.16} />
-      <Wheel x={0.65} z={0.85} r={0.18} w={0.16} />
+      {/* Ultra-low flat chassis — long and narrow */}
+      <mesh castShadow position={[0, 0.12, 0]}><boxGeometry args={[1.2, 0.12, 3.0]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
+      {/* Tapered nose cone — pointed front */}
+      <mesh castShadow position={[0, 0.12, -1.7]}><boxGeometry args={[0.6, 0.1, 0.6]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
+      <mesh castShadow position={[0, 0.12, -2.1]}><boxGeometry args={[0.3, 0.08, 0.4]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
+      {/* Racing stripe down center */}
+      <mesh castShadow position={[0, 0.19, -0.3]}><boxGeometry args={[0.2, 0.02, 2.8]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
+      {/* Low bubble cockpit */}
+      <mesh castShadow position={[0, 0.28, 0.2]}><sphereGeometry args={[0.4, 16, 10]} /><meshStandardMaterial {...darkGlass} /></mesh>
+      {/* Driver head inside cockpit */}
+      <mesh castShadow position={[0, 0.45, 0.3]}><sphereGeometry args={[0.18, 12, 12]} /><meshStandardMaterial color={accent} /></mesh>
+      {/* Small rear lip spoiler */}
+      <mesh castShadow position={[0, 0.22, 1.4]}><boxGeometry args={[1.0, 0.1, 0.15]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
+      {/* Rear diffuser */}
+      <mesh castShadow position={[0, 0.06, 1.5]}><boxGeometry args={[1.0, 0.06, 0.3]} /><meshStandardMaterial color="#222" /></mesh>
+      {/* Tiny low-profile wheels — barely visible */}
+      <Wheel x={-0.55} z={-1.0} r={0.12} w={0.14} />
+      <Wheel x={0.55} z={-1.0} r={0.12} w={0.14} />
+      <Wheel x={-0.55} z={1.0} r={0.12} w={0.14} />
+      <Wheel x={0.55} z={1.0} r={0.12} w={0.14} />
     </group>
   );
 }
 
 function TorqueBody({ color, accent }) {
+  // MUSCLE CAR — wide, aggressive, massive engine + huge rear spoiler
   return (
     <group>
-      {/* Wide chassis */}
-      <mesh castShadow position={[0, 0.28, 0]}><boxGeometry args={[1.8, 0.35, 2.6]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
-      {/* Long hood */}
-      <mesh castShadow position={[0, 0.38, -0.9]}><boxGeometry args={[1.5, 0.18, 1.0]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
-      {/* Engine intake */}
-      <mesh castShadow position={[0, 0.52, -0.7]}><boxGeometry args={[0.5, 0.2, 0.4]} /><meshStandardMaterial color="#333" metalness={0.5} roughness={0.4} /></mesh>
-      {/* Cabin */}
-      <mesh castShadow position={[0, 0.5, 0.3]}><boxGeometry args={[1.0, 0.25, 0.7]} /><meshStandardMaterial {...darkGlass} /></mesh>
+      {/* Wide heavy chassis */}
+      <mesh castShadow position={[0, 0.3, 0]}><boxGeometry args={[2.2, 0.4, 2.8]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
+      {/* Huge raised hood with scoop */}
+      <mesh castShadow position={[0, 0.5, -0.8]}><boxGeometry args={[1.8, 0.3, 1.2]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
+      {/* Hood scoop / supercharger */}
+      <mesh castShadow position={[0, 0.72, -0.6]}><boxGeometry args={[0.5, 0.25, 0.5]} /><meshStandardMaterial color="#222" metalness={0.7} roughness={0.2} /></mesh>
+      <mesh castShadow position={[0, 0.88, -0.6]}><cylinderGeometry args={[0.15, 0.2, 0.12, 8]} /><meshStandardMaterial color="#444" metalness={0.8} roughness={0.2} /></mesh>
+      {/* Cab set back */}
+      <mesh castShadow position={[0, 0.6, 0.4]}><boxGeometry args={[1.4, 0.3, 0.8]} /><meshStandardMaterial {...darkGlass} /></mesh>
       {/* Driver head */}
-      <mesh castShadow position={[0, 0.78, 0.35]}><sphereGeometry args={[0.28, 16, 16]} /><meshStandardMaterial color={accent} /></mesh>
-      {/* Spoiler wing */}
-      <mesh castShadow position={[0, 0.7, 1.2]}><boxGeometry args={[1.8, 0.06, 0.4]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
-      {/* Spoiler posts */}
-      <mesh castShadow position={[-0.5, 0.5, 1.2]}><boxGeometry args={[0.08, 0.4, 0.08]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
-      <mesh castShadow position={[0.5, 0.5, 1.2]}><boxGeometry args={[0.08, 0.4, 0.08]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
+      <mesh castShadow position={[0, 0.9, 0.45]}><sphereGeometry args={[0.25, 14, 14]} /><meshStandardMaterial color={accent} /></mesh>
+      {/* MASSIVE rear spoiler — towering above car */}
+      <mesh castShadow position={[0, 1.1, 1.3]}><boxGeometry args={[2.4, 0.08, 0.5]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
+      {/* Spoiler posts — tall and thick */}
+      <mesh castShadow position={[-0.7, 0.65, 1.3]}><boxGeometry args={[0.1, 0.8, 0.1]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
+      <mesh castShadow position={[0.7, 0.65, 1.3]}><boxGeometry args={[0.1, 0.8, 0.1]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
+      {/* Dual exhaust pipes — thick and prominent */}
+      <mesh castShadow position={[-0.6, 0.2, 1.5]} rotation={[Math.PI / 2, 0, 0]}><cylinderGeometry args={[0.12, 0.12, 0.4, 8]} /><meshStandardMaterial color="#444" metalness={0.8} roughness={0.2} /></mesh>
+      <mesh castShadow position={[0.6, 0.2, 1.5]} rotation={[Math.PI / 2, 0, 0]}><cylinderGeometry args={[0.12, 0.12, 0.4, 8]} /><meshStandardMaterial color="#444" metalness={0.8} roughness={0.2} /></mesh>
       {/* Side exhausts */}
-      <mesh castShadow position={[-0.95, 0.25, 0.7]} rotation={[Math.PI / 2, 0, 0]}><cylinderGeometry args={[0.08, 0.08, 0.4, 8]} /><meshStandardMaterial color="#555" metalness={0.7} roughness={0.3} /></mesh>
-      <mesh castShadow position={[0.95, 0.25, 0.7]} rotation={[Math.PI / 2, 0, 0]}><cylinderGeometry args={[0.08, 0.08, 0.4, 8]} /><meshStandardMaterial color="#555" metalness={0.7} roughness={0.3} /></mesh>
-      {/* Big rear wheels, smaller front */}
-      <Wheel x={-0.85} z={-0.95} r={0.2} w={0.16} />
-      <Wheel x={0.85} z={-0.95} r={0.2} w={0.16} />
-      <Wheel x={-0.85} z={0.95} r={0.28} w={0.22} />
-      <Wheel x={0.85} z={0.95} r={0.28} w={0.22} />
+      <mesh castShadow position={[-1.15, 0.25, 0.5]} rotation={[Math.PI / 2, 0, 0]}><cylinderGeometry args={[0.08, 0.08, 0.5, 8]} /><meshStandardMaterial color="#555" metalness={0.7} roughness={0.3} /></mesh>
+      <mesh castShadow position={[1.15, 0.25, 0.5]} rotation={[Math.PI / 2, 0, 0]}><cylinderGeometry args={[0.08, 0.08, 0.5, 8]} /><meshStandardMaterial color="#555" metalness={0.7} roughness={0.3} /></mesh>
+      {/* Fat rear wheels, smaller front */}
+      <Wheel x={-1.05} z={-1.0} r={0.22} w={0.18} />
+      <Wheel x={1.05} z={-1.0} r={0.22} w={0.18} />
+      <Wheel x={-1.05} z={1.0} r={0.35} w={0.28} />
+      <Wheel x={1.05} z={1.0} r={0.35} w={0.28} />
     </group>
   );
 }
 
 function GliderBody({ color, accent }) {
+  // FORMULA / OPEN-WHEEL — ultra-wide wings, narrow body, exposed wheels far out
   return (
     <group>
-      {/* Narrow central nose */}
-      <mesh castShadow position={[0, 0.22, -0.2]}><boxGeometry args={[0.7, 0.22, 2.8]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
-      {/* Front wing */}
-      <mesh castShadow position={[0, 0.12, -1.5]}><boxGeometry args={[2.2, 0.04, 0.3]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
-      {/* Rear wing */}
-      <mesh castShadow position={[0, 0.55, 1.2]}><boxGeometry args={[1.8, 0.04, 0.3]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
+      {/* Narrow pointed nose cone */}
+      <mesh castShadow position={[0, 0.18, -0.5]}><boxGeometry args={[0.5, 0.16, 2.4]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
+      <mesh castShadow position={[0, 0.18, -1.9]}><boxGeometry args={[0.3, 0.1, 0.5]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
+      {/* HUGE front wing — very wide */}
+      <mesh castShadow position={[0, 0.08, -2.0]}><boxGeometry args={[3.0, 0.05, 0.4]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
+      {/* Front wing endplates */}
+      <mesh castShadow position={[-1.5, 0.12, -2.0]}><boxGeometry args={[0.04, 0.2, 0.5]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
+      <mesh castShadow position={[1.5, 0.12, -2.0]}><boxGeometry args={[0.04, 0.2, 0.5]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
+      {/* HUGE rear wing — elevated */}
+      <mesh castShadow position={[0, 0.7, 1.3]}><boxGeometry args={[2.6, 0.06, 0.4]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
       {/* Rear wing endplates */}
-      <mesh castShadow position={[-0.9, 0.5, 1.2]}><boxGeometry args={[0.04, 0.15, 0.35]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
-      <mesh castShadow position={[0.9, 0.5, 1.2]}><boxGeometry args={[0.04, 0.15, 0.35]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
+      <mesh castShadow position={[-1.3, 0.6, 1.3]}><boxGeometry args={[0.04, 0.3, 0.5]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
+      <mesh castShadow position={[1.3, 0.6, 1.3]}><boxGeometry args={[0.04, 0.3, 0.5]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
       {/* Rear wing posts */}
-      <mesh castShadow position={[-0.3, 0.38, 1.1]}><boxGeometry args={[0.06, 0.25, 0.06]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
-      <mesh castShadow position={[0.3, 0.38, 1.1]}><boxGeometry args={[0.06, 0.25, 0.06]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
-      {/* Side pods */}
-      <mesh castShadow position={[-0.7, 0.2, 0.2]}><boxGeometry args={[0.5, 0.2, 1.0]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
-      <mesh castShadow position={[0.7, 0.2, 0.2]}><boxGeometry args={[0.5, 0.2, 1.0]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
-      {/* Cockpit */}
-      <mesh castShadow position={[0, 0.4, 0.1]}><boxGeometry args={[0.5, 0.18, 0.5]} /><meshStandardMaterial {...darkGlass} /></mesh>
-      {/* Driver head */}
-      <mesh castShadow position={[0, 0.6, 0.2]}><sphereGeometry args={[0.22, 16, 16]} /><meshStandardMaterial color={accent} /></mesh>
-      {/* Large exposed wheels */}
-      <Wheel x={-1.05} z={-1.0} r={0.25} w={0.2} />
-      <Wheel x={1.05} z={-1.0} r={0.25} w={0.2} />
-      <Wheel x={-1.05} z={0.9} r={0.25} w={0.2} />
-      <Wheel x={1.05} z={0.9} r={0.25} w={0.2} />
+      <mesh castShadow position={[-0.3, 0.42, 1.2]}><boxGeometry args={[0.06, 0.4, 0.06]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
+      <mesh castShadow position={[0.3, 0.42, 1.2]}><boxGeometry args={[0.06, 0.4, 0.06]} /><meshStandardMaterial {...accentMat(accent)} /></mesh>
+      {/* Side pods — aerodynamic */}
+      <mesh castShadow position={[-0.6, 0.18, 0.2]}><boxGeometry args={[0.45, 0.18, 1.2]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
+      <mesh castShadow position={[0.6, 0.18, 0.2]}><boxGeometry args={[0.45, 0.18, 1.2]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
+      {/* Air intake above driver */}
+      <mesh castShadow position={[0, 0.5, 0.1]}><boxGeometry args={[0.25, 0.15, 0.2]} /><meshStandardMaterial color={color} metalness={0.7} roughness={0.2} /></mesh>
+      {/* Open cockpit */}
+      <mesh castShadow position={[0, 0.32, 0.0]}><boxGeometry args={[0.4, 0.14, 0.6]} /><meshStandardMaterial {...darkGlass} /></mesh>
+      {/* Driver head — visible in open cockpit */}
+      <mesh castShadow position={[0, 0.5, 0.15]}><sphereGeometry args={[0.18, 12, 12]} /><meshStandardMaterial color={accent} /></mesh>
+      {/* Helmet visor */}
+      <mesh castShadow position={[0, 0.5, -0.02]}><sphereGeometry args={[0.13, 8, 6, 0, Math.PI]} /><meshStandardMaterial {...darkGlass} /></mesh>
+      {/* Exposed wheels — far out from body */}
+      <Wheel x={-1.4} z={-1.2} r={0.28} w={0.22} />
+      <Wheel x={1.4} z={-1.2} r={0.28} w={0.22} />
+      <Wheel x={-1.4} z={1.0} r={0.3} w={0.24} />
+      <Wheel x={1.4} z={1.0} r={0.3} w={0.24} />
     </group>
   );
 }
 
 function BulldogBody({ color, accent }) {
+  // MONSTER TRUCK — very tall, lifted, massive wheels, imposing
   return (
     <group>
-      {/* Tall wide chassis */}
-      <mesh castShadow position={[0, 0.4, 0]}><boxGeometry args={[2.0, 0.5, 2.0]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
-      {/* Cab */}
-      <mesh castShadow position={[0, 0.8, 0.15]}><boxGeometry args={[1.5, 0.35, 1.2]} /><meshStandardMaterial {...darkGlass} /></mesh>
-      {/* Bull bar */}
-      <mesh castShadow position={[0, 0.35, -1.15]}><boxGeometry args={[2.2, 0.3, 0.2]} /><meshStandardMaterial color="#888" metalness={0.6} roughness={0.3} /></mesh>
-      {/* Roof rack */}
-      <mesh castShadow position={[0, 1.0, 0.15]}><boxGeometry args={[1.3, 0.04, 1.0]} /><meshStandardMaterial color="#666" metalness={0.5} roughness={0.4} /></mesh>
-      {/* Roof rack rails */}
-      <mesh castShadow position={[-0.6, 0.97, 0.15]}><boxGeometry args={[0.06, 0.06, 1.0]} /><meshStandardMaterial color="#666" /></mesh>
-      <mesh castShadow position={[0.6, 0.97, 0.15]}><boxGeometry args={[0.06, 0.06, 1.0]} /><meshStandardMaterial color="#666" /></mesh>
-      {/* Driver head */}
-      <mesh castShadow position={[0, 1.15, 0.2]}><sphereGeometry args={[0.28, 16, 16]} /><meshStandardMaterial color={accent} /></mesh>
-      {/* Taillights */}
-      <mesh position={[-0.7, 0.5, 1.02]}><boxGeometry args={[0.3, 0.12, 0.05]} /><meshStandardMaterial color="#ff3333" emissive="#ff0000" emissiveIntensity={0.5} /></mesh>
-      <mesh position={[0.7, 0.5, 1.02]}><boxGeometry args={[0.3, 0.12, 0.05]} /><meshStandardMaterial color="#ff3333" emissive="#ff0000" emissiveIntensity={0.5} /></mesh>
-      {/* Oversized wheels with high ride */}
-      <Wheel x={-0.9} z={-0.8} r={0.3} w={0.22} />
-      <Wheel x={0.9} z={-0.8} r={0.3} w={0.22} />
-      <Wheel x={-0.9} z={0.8} r={0.3} w={0.22} />
-      <Wheel x={0.9} z={0.8} r={0.3} w={0.22} />
+      {/* Lifted chassis — raised high off ground */}
+      <mesh castShadow position={[0, 0.65, 0]}><boxGeometry args={[2.4, 0.5, 2.2]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
+      {/* Tall cab with large windows */}
+      <mesh castShadow position={[0, 1.1, 0.1]}><boxGeometry args={[2.0, 0.5, 1.6]} /><meshStandardMaterial {...darkGlass} /></mesh>
+      {/* Roof */}
+      <mesh castShadow position={[0, 1.38, 0.1]}><boxGeometry args={[2.1, 0.06, 1.7]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
+      {/* Heavy chrome bull bar + push bumper */}
+      <mesh castShadow position={[0, 0.55, -1.25]}><boxGeometry args={[2.6, 0.4, 0.15]} /><meshStandardMaterial color="#aaa" metalness={0.8} roughness={0.15} /></mesh>
+      <mesh castShadow position={[0, 0.85, -1.25]}><boxGeometry args={[1.8, 0.2, 0.12]} /><meshStandardMaterial color="#999" metalness={0.8} roughness={0.15} /></mesh>
+      {/* Bull bar verticals */}
+      <mesh castShadow position={[-0.6, 0.7, -1.25]}><boxGeometry args={[0.1, 0.5, 0.1]} /><meshStandardMaterial color="#999" metalness={0.8} roughness={0.15} /></mesh>
+      <mesh castShadow position={[0.6, 0.7, -1.25]}><boxGeometry args={[0.1, 0.5, 0.1]} /><meshStandardMaterial color="#999" metalness={0.8} roughness={0.15} /></mesh>
+      {/* Roof rack with lights */}
+      <mesh castShadow position={[0, 1.45, 0.1]}><boxGeometry args={[1.8, 0.05, 1.2]} /><meshStandardMaterial color="#555" metalness={0.6} roughness={0.3} /></mesh>
+      {/* Roof rack rail sides */}
+      <mesh castShadow position={[-0.85, 1.44, 0.1]}><boxGeometry args={[0.06, 0.08, 1.2]} /><meshStandardMaterial color="#555" /></mesh>
+      <mesh castShadow position={[0.85, 1.44, 0.1]}><boxGeometry args={[0.06, 0.08, 1.2]} /><meshStandardMaterial color="#555" /></mesh>
+      {/* Roof lights (4x) */}
+      <mesh position={[-0.5, 1.5, -0.2]}><sphereGeometry args={[0.1, 8, 8]} /><meshStandardMaterial color="#ffee00" emissive="#ffee00" emissiveIntensity={0.6} /></mesh>
+      <mesh position={[-0.17, 1.5, -0.2]}><sphereGeometry args={[0.1, 8, 8]} /><meshStandardMaterial color="#ffee00" emissive="#ffee00" emissiveIntensity={0.6} /></mesh>
+      <mesh position={[0.17, 1.5, -0.2]}><sphereGeometry args={[0.1, 8, 8]} /><meshStandardMaterial color="#ffee00" emissive="#ffee00" emissiveIntensity={0.6} /></mesh>
+      <mesh position={[0.5, 1.5, -0.2]}><sphereGeometry args={[0.1, 8, 8]} /><meshStandardMaterial color="#ffee00" emissive="#ffee00" emissiveIntensity={0.6} /></mesh>
+      {/* Driver head — high up */}
+      <mesh castShadow position={[0, 1.55, 0.15]}><sphereGeometry args={[0.25, 14, 14]} /><meshStandardMaterial color={accent} /></mesh>
+      {/* Big red taillights */}
+      <mesh position={[-0.85, 0.7, 1.12]}><boxGeometry args={[0.35, 0.15, 0.05]} /><meshStandardMaterial color="#ff2222" emissive="#ff0000" emissiveIntensity={0.7} /></mesh>
+      <mesh position={[0.85, 0.7, 1.12]}><boxGeometry args={[0.35, 0.15, 0.05]} /><meshStandardMaterial color="#ff2222" emissive="#ff0000" emissiveIntensity={0.7} /></mesh>
+      {/* Fender flares */}
+      <mesh castShadow position={[-1.15, 0.5, -0.7]}><boxGeometry args={[0.25, 0.3, 0.9]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
+      <mesh castShadow position={[1.15, 0.5, -0.7]}><boxGeometry args={[0.25, 0.3, 0.9]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
+      <mesh castShadow position={[-1.15, 0.5, 0.7]}><boxGeometry args={[0.25, 0.3, 0.9]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
+      <mesh castShadow position={[1.15, 0.5, 0.7]}><boxGeometry args={[0.25, 0.3, 0.9]} /><meshStandardMaterial {...paintMat(color)} /></mesh>
+      {/* MASSIVE wheels — monster truck size */}
+      <Wheel x={-1.15} z={-0.8} r={0.45} w={0.3} />
+      <Wheel x={1.15} z={-0.8} r={0.45} w={0.3} />
+      <Wheel x={-1.15} z={0.8} r={0.45} w={0.3} />
+      <Wheel x={1.15} z={0.8} r={0.45} w={0.3} />
     </group>
   );
 }
@@ -1124,11 +1168,11 @@ function RaceScene({ theme, character, car, platform, onFinish }){
         <hemisphereLight skyColor={bgColor} groundColor={hemiGround} intensity={0.6} />
         <directionalLight position={[20, 30, 15]} intensity={1.2} castShadow shadow-mapSize-width={2048} shadow-mapSize-height={2048} />
         <directionalLight position={[-15, 20, -10]} intensity={0.4} />
-        <Environment preset={theme?.envPreset || "sunset"} background={false} />
+        <SafeEnvironment preset={theme?.envPreset || "sunset"} background={false} />
 
         {/* Ground + Track */}
         <GroundPlane color={theme?.turf || "#1b5e20"} />
-        {curve && <TrackRoad curve={curve} trackWidth={trackWidth} />}
+        {curve && <TrackRoad curve={curve} trackWidth={trackWidth} roadColor={theme?.roadColor || "#555"} />}
         {curve && <TrackCurbs curve={curve} trackWidth={trackWidth} />}
         {curve && <TrackStartLine curve={curve} trackWidth={trackWidth} />}
         {curve && <BoostPads curve={curve} boostTs={boostTs} />}
@@ -1202,12 +1246,12 @@ function AutoRotate({ children }) {
 
 function KartShowcase({ color = "#29b6f6", accent = "#ffffff", bodyType = "sprinter", className = "" }) {
   return (
-    <div className={`rounded-2xl overflow-hidden bg-white/5 border border-white/10 ${className}`}>
+    <div key={bodyType + color} className={`rounded-2xl overflow-hidden bg-white/5 border border-white/10 ${className}`}>
       <Canvas camera={{ position: [3, 2, 4], fov: 40 }} dpr={[1, 1.5]}>
         <color attach="background" args={["#0f172a"]} />
         <ambientLight intensity={0.5} />
         <directionalLight position={[5, 8, 5]} intensity={1} />
-        <Environment preset="sunset" background={false} />
+        <SafeEnvironment preset="sunset" background={false} />
         <AutoRotate>
           <KartModel color={color} accent={accent} bodyType={bodyType} />
         </AutoRotate>
@@ -1221,7 +1265,7 @@ function TrackPreviewMesh({ track }) {
   if (!curve) return null;
   return (
     <group>
-      <TrackRoad curve={curve} trackWidth={track.trackWidth || 10} />
+      <TrackRoad curve={curve} trackWidth={track.trackWidth || 10} roadColor={track.roadColor || "#555"} />
       <TrackCurbs curve={curve} trackWidth={track.trackWidth || 10} />
       <BoostPads curve={curve} boostTs={track.boostTs || []} />
       <GroundPlane color={track.turf} size={120} />
@@ -1230,11 +1274,20 @@ function TrackPreviewMesh({ track }) {
 }
 
 function TrackPreview({ track }) {
+  // Calculate camera height to fit the track in view
+  const camHeight = useMemo(() => {
+    if (!track.waypoints) return 80;
+    let maxR = 0;
+    for (const [x, z] of track.waypoints) {
+      maxR = Math.max(maxR, Math.hypot(x, z));
+    }
+    return maxR * 2.2; // enough height to see entire track
+  }, [track]);
   return (
-    <div className="h-28 rounded-xl overflow-hidden">
-      <Canvas camera={{ position: [0, 60, 30], fov: 40 }} dpr={[1, 1.5]}>
+    <div key={track.id} className="h-28 rounded-xl overflow-hidden">
+      <Canvas camera={{ position: [0, camHeight, camHeight * 0.05], fov: 45 }} dpr={[1, 1.5]}>
         <color attach="background" args={[track.sky]} />
-        <ambientLight intensity={0.6} />
+        <ambientLight intensity={0.8} />
         <directionalLight position={[10, 30, 10]} intensity={0.8} />
         <TrackPreviewMesh track={track} />
       </Canvas>
@@ -1320,7 +1373,8 @@ function CarScreen(){
       <StepIndicator step={2} />
       <div className="flex-1 overflow-y-auto min-h-0 px-4 sm:px-6 pb-4">
         <KartShowcase color={sel.character.color} bodyType={sel.car.id} className="h-40 sm:h-48 mb-4" />
-        <div className="text-center text-lg font-semibold mb-1">{sel.car.name}</div>
+        <div className="text-center text-lg font-semibold mb-0">{sel.car.name}</div>
+        {sel.car.desc && <div className="text-center text-sm text-white/60 mb-1">{sel.car.desc}</div>}
         <div className="max-w-xs mx-auto mb-4">
           <Stat label="Accel" v={sel.car.accel} max={10} />
           <Stat label="Top Speed" v={sel.car.maxSpeed/4} max={10} />
