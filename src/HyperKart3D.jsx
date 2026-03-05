@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback, Suspense } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { Environment as DreiEnvironment } from "@react-three/drei";
+import { Environment as DreiEnvironment, Sky, Cloud, Sparkles } from "@react-three/drei";
 
 function SafeEnvironment(props) {
   return <Suspense fallback={null}><DreiEnvironment {...props} /></Suspense>;
@@ -52,11 +52,11 @@ const TRACKS = [
     seatColor: "#334155",
     turf: "#2e7d32",
     roadColor: "#555555",
-    trackWidth: 10,
+    trackWidth: 16,
     envPreset: "park",
     waypoints: [
-      [-18,-32],[-32,-18],[-38,0],[-28,8],[-20,14],[-24,22],[-14,30],
-      [0,34],[18,30],[32,18],[38,0],[32,-20],[18,-32],[0,-35],
+      [-32,-58],[-58,-32],[-68,0],[-50,14],[-36,25],[-43,40],[-25,54],
+      [0,61],[32,54],[58,32],[68,0],[58,-36],[32,-58],[0,-63],
     ],
     boostTs: [0.15, 0.5, 0.8],
   },
@@ -69,11 +69,11 @@ const TRACKS = [
     seatColor: "#1f2937",
     turf: "#1a1a2e",
     roadColor: "#222233",
-    trackWidth: 9,
+    trackWidth: 14,
     envPreset: "night",
     waypoints: [
-      [15,10],[30,10],[30,-10],[15,-10],[15,-25],[-15,-25],
-      [-15,-10],[-30,-10],[-30,10],[-15,10],[-15,25],[15,25],
+      [27,18],[54,18],[54,-18],[27,-18],[27,-45],[-27,-45],
+      [-27,-18],[-54,-18],[-54,18],[-27,18],[-27,45],[27,45],
     ],
     boostTs: [0.12, 0.45, 0.78],
   },
@@ -86,17 +86,71 @@ const TRACKS = [
     seatColor: "#5d4037",
     turf: "#c2956a",
     roadColor: "#8B5A2B",
-    trackWidth: 11,
+    trackWidth: 16,
     envPreset: "sunset",
     waypoints: [
-      [0,40],[22,36],[40,22],[44,0],[40,-20],[25,-36],
-      [0,-40],[-22,-34],[-40,-18],[-42,5],[-30,24],[-12,38],
+      [0,72],[40,65],[72,40],[79,0],[72,-36],[45,-65],
+      [0,-72],[-40,-61],[-72,-32],[-76,9],[-54,43],[-22,68],
     ],
     boostTs: [0.1, 0.4, 0.7],
   },
 ];
 
 const DEFAULT_LAPS = 3;
+
+// -----------------------------
+// Procedural textures (CanvasTexture)
+// -----------------------------
+function createRoadTexture(baseColor = "#444") {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256; canvas.height = 256;
+  const ctx = canvas.getContext("2d");
+  // Asphalt base
+  ctx.fillStyle = baseColor;
+  ctx.fillRect(0, 0, 256, 256);
+  // Grain noise
+  const bc = parseInt(baseColor.replace("#",""), 16);
+  const br = (bc >> 16) & 0xff, bg = (bc >> 8) & 0xff, bb = bc & 0xff;
+  for (let i = 0; i < 3000; i++) {
+    const v = (Math.random() - 0.5) * 30;
+    ctx.fillStyle = `rgba(${clamp(br+v,0,255)|0},${clamp(bg+v,0,255)|0},${clamp(bb+v,0,255)|0},0.4)`;
+    ctx.fillRect(Math.random()*256, Math.random()*256, 1+Math.random()*2, 1+Math.random()*2);
+  }
+  // Dashed center line
+  ctx.strokeStyle = "rgba(255,255,255,0.6)";
+  ctx.lineWidth = 3;
+  ctx.setLineDash([20, 18]);
+  ctx.beginPath(); ctx.moveTo(128, 0); ctx.lineTo(128, 256); ctx.stroke();
+  // Edge lines (solid)
+  ctx.strokeStyle = "rgba(255,255,255,0.3)";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(8, 256); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(248, 0); ctx.lineTo(248, 256); ctx.stroke();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+function createGroundTexture(baseColor = "#2e7d32") {
+  const canvas = document.createElement("canvas");
+  canvas.width = 128; canvas.height = 128;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = baseColor;
+  ctx.fillRect(0, 0, 128, 128);
+  const bc = parseInt(baseColor.replace("#",""), 16);
+  const br = (bc >> 16) & 0xff, bg = (bc >> 8) & 0xff, bb = bc & 0xff;
+  for (let i = 0; i < 2000; i++) {
+    const v = (Math.random() - 0.5) * 40;
+    ctx.fillStyle = `rgba(${clamp(br+v,0,255)|0},${clamp(bg+v,0,255)|0},${clamp(bb+v,0,255)|0},0.5)`;
+    const s = 1 + Math.random() * 3;
+    ctx.fillRect(Math.random()*128, Math.random()*128, s, s);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(30, 30);
+  return tex;
+}
 
 // -----------------------------
 // Utilities
@@ -330,9 +384,10 @@ function TouchPad({ onChange }) {
 
 function TrackRoad({ curve, trackWidth, roadColor = "#555" }) {
   const geo = useMemo(() => createRoadGeometry(curve, trackWidth), [curve, trackWidth]);
+  const roadTex = useMemo(() => createRoadTexture(roadColor), [roadColor]);
   return (
     <mesh geometry={geo}>
-      <meshStandardMaterial color={roadColor} metalness={0.1} roughness={0.85} side={THREE.DoubleSide} />
+      <meshStandardMaterial map={roadTex} metalness={0.1} roughness={0.85} side={THREE.DoubleSide} />
     </mesh>
   );
 }
@@ -375,12 +430,12 @@ function BoostPads({ curve, boostTs }) {
         return (
           <group key={i} position={[p.x, 0.03, p.z]} rotation={[0, angle, 0]}>
             <mesh rotation={[-Math.PI / 2, 0, 0]}>
-              <planeGeometry args={[6, 3]} />
+              <planeGeometry args={[10, 5]} />
               <meshBasicMaterial color="#00e5ff" transparent opacity={0.5} />
             </mesh>
             {/* Arrow markers */}
             <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-              <planeGeometry args={[1.5, 2]} />
+              <planeGeometry args={[2.5, 3.5]} />
               <meshBasicMaterial color="#00ffff" transparent opacity={0.7} />
             </mesh>
           </group>
@@ -390,11 +445,12 @@ function BoostPads({ curve, boostTs }) {
   );
 }
 
-function GroundPlane({ color = "#1b5e20", size = 200 }) {
+function GroundPlane({ color = "#1b5e20", size = 400 }) {
+  const groundTex = useMemo(() => createGroundTexture(color), [color]);
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
       <planeGeometry args={[size, size]} />
-      <meshStandardMaterial color={color} roughness={1} />
+      <meshStandardMaterial map={groundTex} roughness={1} />
     </mesh>
   );
 }
@@ -409,7 +465,7 @@ function ClassicProps({ curve }) {
       const nx = -tang.z, nz = tang.x;
       const len = Math.hypot(nx, nz) || 1;
       const side = i % 2 === 0 ? 1 : -1;
-      const dist = 12 + Math.random() * 8;
+      const dist = 20 + Math.random() * 15;
       arr.push({ x: p.x + (nx / len) * side * dist, z: p.z + (nz / len) * side * dist, h: 2 + Math.random() * 3 });
     }
     return arr;
@@ -436,7 +492,7 @@ function CityNeonProps({ curve }) {
       const nx = -tang.z, nz = tang.x;
       const len = Math.hypot(nx, nz) || 1;
       const side = i % 2 === 0 ? 1 : -1;
-      const dist = 10 + Math.random() * 5;
+      const dist = 18 + Math.random() * 10;
       const colors = ["#ff00ff", "#00ffff", "#ff6600", "#ffff00", "#ff0066"];
       arr.push({ x: p.x + (nx / len) * side * dist, z: p.z + (nz / len) * side * dist, h: 3 + Math.random() * 5, c: colors[i % colors.length] });
     }
@@ -464,7 +520,7 @@ function WestRockProps({ curve }) {
       const nx = -tang.z, nz = tang.x;
       const len = Math.hypot(nx, nz) || 1;
       const side = i % 2 === 0 ? 1 : -1;
-      const dist = 11 + Math.random() * 10;
+      const dist = 20 + Math.random() * 15;
       arr.push({ x: p.x + (nx / len) * side * dist, z: p.z + (nz / len) * side * dist, s: 0.8 + Math.random() * 2.5 });
     }
     return arr;
@@ -633,7 +689,7 @@ const Kart = React.forwardRef(function Kart({ color="#29b6f6", accent="#ffffff",
       const padCenter = curve.getPointAt(bt);
       const dx = pos.current.x - padCenter.x;
       const dz = pos.current.z - padCenter.z;
-      if (Math.hypot(dx, dz) < 4 && state.clock.elapsedTime - lastBoostTime.current > 1.0) {
+      if (Math.hypot(dx, dz) < 6 && state.clock.elapsedTime - lastBoostTime.current > 1.0) {
         vel.current = Math.min(maxSpeed * 1.3, vel.current + 10);
         lastBoostTime.current = state.clock.elapsedTime;
       }
@@ -890,7 +946,7 @@ function CameraRig({ targetRef }){
     const t = targetRef.current?.position || new THREE.Vector3();
     const rotY = targetRef.current?.rotation?.y || 0;
     const behind = new THREE.Vector3(Math.sin(rotY), 0, Math.cos(rotY));
-    const desired = new THREE.Vector3().copy(t).addScaledVector(behind, 8).add(new THREE.Vector3(0, 5, 0));
+    const desired = new THREE.Vector3().copy(t).addScaledVector(behind, 10).add(new THREE.Vector3(0, 7, 0));
 
     // Look-ahead when drifting
     if (liveRace.drifting) {
@@ -916,13 +972,13 @@ function CameraRig({ targetRef }){
 // AI opponents
 // -----------------------------
 const AI_RACERS = [
-  { color: "#ef5da8", accent: "#fff", startT: 0.08, speed: 23, bodyType: "glider", offset: -1.5 },
-  { color: "#ffe082", accent: "#fff", startT: 0.16, speed: 28, bodyType: "torque", offset: 1.5 },
-  { color: "#ff7043", accent: "#fff", startT: 0.24, speed: 20, bodyType: "bulldog", offset: -0.5 },
-  { color: "#8bc34a", accent: "#fff", startT: 0.32, speed: 26, bodyType: "sprinter", offset: 0.5 },
+  { color: "#ef5da8", accent: "#fff", startT: 0.08, speedMul: 0.90, bodyType: "glider", offset: -2.5, tier: "challenger" },
+  { color: "#ffe082", accent: "#fff", startT: 0.16, speedMul: 0.97, bodyType: "torque", offset: 2.5, tier: "threat" },
+  { color: "#ff7043", accent: "#fff", startT: 0.24, speedMul: 0.78, bodyType: "bulldog", offset: -1.0, tier: "rookie" },
+  { color: "#8bc34a", accent: "#fff", startT: 0.32, speedMul: 0.85, bodyType: "sprinter", offset: 1.0, tier: "competitive" },
 ];
 
-function AIKart({ color, accent="#fff", startT, speed, bodyType, offset=0, curve, trackWidth, playerProgressRef }) {
+function AIKart({ color, accent="#fff", startT, speedMul=0.85, bodyType, offset=0, tier="competitive", curve, trackWidth, playerMaxSpeed=30 }) {
   const ref = useRef();
   const progress = useRef(startT);
   const lap = useRef(1);
@@ -940,34 +996,32 @@ function AIKart({ color, accent="#fff", startT, speed, bodyType, offset=0, curve
     if (dt > 0.05) dt = 0.05;
     if (!curve) return;
     const curveLen = curve.getLength();
+    const baseSpeed = speedMul * playerMaxSpeed;
 
-    // Rubber banding: slow down when ahead, speed up when behind
+    // Smooth rubber banding: proportional to gap
     const playerProgress = (liveRace.playerLap - 1) + liveRace.playerT;
     const aiProgress = (lap.current - 1) + progress.current;
     const gap = aiProgress - playerProgress;
-    let rubberBand = 1.0;
-    if (gap > 0.5) rubberBand = 0.65;
-    else if (gap > 0.2) rubberBand = 0.78;
-    else if (gap < -0.5) rubberBand = 1.3;
-    else if (gap < -0.2) rubberBand = 1.18;
+    const rubberBand = clamp(1.0 - gap * 0.5, 0.6, 1.4);
 
-    // Curvature-based speed: slow in corners
+    // Curvature-based speed: tier determines corner skill
     const t1 = progress.current;
     const t2 = (t1 + 0.01) % 1;
     const tang1 = curve.getTangentAt(t1);
     const tang2 = curve.getTangentAt(t2);
     const curvature = tang1.distanceTo(tang2) * 100;
-    const cornerFactor = 1.0 / (1 + curvature * 2.5);
+    const curveMul = tier === "threat" ? 1.8 : tier === "rookie" ? 3.5 : 2.5;
+    const cornerFactor = 1.0 / (1 + curvature * curveMul);
 
     // Speed with wobble
-    const wobbleSpeed = 1 + Math.sin(state.clock.elapsedTime * 0.7 + wobble.current) * 0.08;
+    const wobbleSpeed = 1 + Math.sin(state.clock.elapsedTime * 0.7 + wobble.current) * 0.06;
 
-    // Random brief mistakes (slow down for ~0.3s every 5-8 seconds)
-    const mistakeCycle = 5.5 + wobble.current * 0.8; // varies per AI
+    // Light random mistakes (20% slowdown for 0.2s every 8-12 seconds)
+    const mistakeCycle = 8 + wobble.current * 1.3;
     const timeMod = state.clock.elapsedTime % mistakeCycle;
-    const mistakeFactor = (timeMod < 0.3) ? 0.55 : 1.0;
+    const mistakeFactor = (timeMod < 0.2) ? 0.8 : 1.0;
 
-    const actualSpeed = speed * rubberBand * cornerFactor * wobbleSpeed * mistakeFactor;
+    const actualSpeed = baseSpeed * rubberBand * cornerFactor * wobbleSpeed * mistakeFactor;
     const tDelta = (actualSpeed * dt) / curveLen;
 
     prevT.current = progress.current;
@@ -983,10 +1037,10 @@ function AIKart({ color, accent="#fff", startT, speed, bodyType, offset=0, curve
     const tang = curve.getTangentAt(progress.current);
     const nx = -tang.z, nz = tang.x;
     const len = Math.hypot(nx, nz) || 1;
-    // Dynamic lane changes — swerve to avoid nearby AI / overtake
-    const overtakeOff = Math.sin(state.clock.elapsedTime * 0.5 + wobble.current * 2) * 2.0;
-    const sideOff = offset + Math.sin(state.clock.elapsedTime * 0.3 + wobble.current) * 1.0 + overtakeOff * 0.4;
-    const clampedOff = clamp(sideOff, -trackWidth / 2 + 1, trackWidth / 2 - 1);
+    // Dynamic lane changes — swerve to overtake
+    const overtakeOff = Math.sin(state.clock.elapsedTime * 0.5 + wobble.current * 2) * 2.5;
+    const sideOff = offset + Math.sin(state.clock.elapsedTime * 0.3 + wobble.current) * 1.5 + overtakeOff * 0.5;
+    const clampedOff = clamp(sideOff, -trackWidth / 2 + 1.5, trackWidth / 2 - 1.5);
 
     if (ref.current) {
       ref.current.position.set(p.x + (nx / len) * clampedOff, 0.35, p.z + (nz / len) * clampedOff);
@@ -1178,13 +1232,32 @@ function RaceScene({ theme, character, car, platform, onFinish }){
 
   return (
     <div className="relative h-full w-full">
-      <Canvas shadows camera={{ position:[0,8,12], fov:55 }}>
+      <Canvas shadows camera={{ position:[0,10,15], fov:55 }}>
         <color attach="background" args={[bgColor]} />
-        <fog attach="fog" args={[fogColor, 40, 150]} />
+        <fog attach="fog" args={[fogColor, 60, 300]} />
         <hemisphereLight skyColor={bgColor} groundColor={hemiGround} intensity={0.6} />
         <directionalLight position={[20, 30, 15]} intensity={1.2} castShadow shadow-mapSize-width={2048} shadow-mapSize-height={2048} />
         <directionalLight position={[-15, 20, -10]} intensity={0.4} />
         <SafeEnvironment preset={theme?.envPreset || "sunset"} background={false} />
+
+        {/* Sky — physically-based for day/sunset tracks */}
+        {theme.theme === "classic" && <Sky sunPosition={[100, 20, 100]} turbidity={8} rayleigh={2} />}
+        {theme.theme === "west" && <Sky sunPosition={[0, 5, -100]} turbidity={10} rayleigh={0.5} mieCoefficient={0.1} />}
+
+        {/* Clouds — atmosphere for outdoor tracks */}
+        {theme.theme === "classic" && (
+          <Suspense fallback={null}>
+            <Cloud position={[50, 40, -40]} speed={0.2} opacity={0.4} />
+            <Cloud position={[-60, 50, 30]} speed={0.15} opacity={0.35} />
+            <Cloud position={[20, 35, 60]} speed={0.25} opacity={0.3} />
+          </Suspense>
+        )}
+        {theme.theme === "west" && (
+          <Suspense fallback={null}>
+            <Cloud position={[40, 35, -50]} speed={0.1} opacity={0.3} color="#ffcc80" />
+            <Cloud position={[-50, 45, 20]} speed={0.12} opacity={0.25} color="#ffa060" />
+          </Suspense>
+        )}
 
         {/* Ground + Track */}
         <GroundPlane color={theme?.turf || "#1b5e20"} />
@@ -1204,10 +1277,10 @@ function RaceScene({ theme, character, car, platform, onFinish }){
 
         {/* AI opponents */}
         {aiRacers.map((ai, i) => (
-          <AIKart key={i} color={ai.color} accent={ai.accent} startT={ai.startT} speed={ai.speed} bodyType={ai.bodyType} offset={ai.offset} curve={curve} trackWidth={trackWidth} />
+          <AIKart key={i} color={ai.color} accent={ai.accent} startT={ai.startT} speedMul={ai.speedMul} bodyType={ai.bodyType} offset={ai.offset} tier={ai.tier} curve={curve} trackWidth={trackWidth} playerMaxSpeed={car?.maxSpeed || 30} />
         ))}
 
-        {theme.theme !== "classic" && <StarsField count={1000} radius={120} />}
+        {theme.theme !== "classic" && <StarsField count={1000} radius={250} />}
       </Canvas>
 
       {/* HUD: Lap counter + Position */}
