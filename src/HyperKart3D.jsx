@@ -42,11 +42,23 @@ const CARS = [
   { id: "bulldog", name: "Bulldog", accel: 6.5, maxSpeed: 36, handling: 0.7, desc: "Heavy hitter, top speed king" },
 ];
 
+// Track unlock system: win (1st place) to unlock the next track
+const unlockedTracks = { classic: true, city: false, west: false };
+function getUnlocked() { return { ...unlockedTracks }; }
+function unlockNext(completedId) {
+  const order = TRACKS.map(t => t.id);
+  const idx = order.indexOf(completedId);
+  if (idx >= 0 && idx < order.length - 1) {
+    unlockedTracks[order[idx + 1]] = true;
+  }
+}
+
 const TRACKS = [
   {
     id: "classic",
     name: "Speedway",
     theme: "classic",
+    difficulty: 1,
     sky: "#87ceeb",
     fog: "#a6d5f7",
     seatColor: "#334155",
@@ -64,6 +76,7 @@ const TRACKS = [
     id: "city",
     name: "Street Circuit",
     theme: "city",
+    difficulty: 2,
     sky: "#1a1a2e",
     fog: "#16213e",
     seatColor: "#1f2937",
@@ -81,6 +94,7 @@ const TRACKS = [
     id: "west",
     name: "Canyon Run",
     theme: "west",
+    difficulty: 3,
     sky: "#ffcc80",
     fog: "#ffc080",
     seatColor: "#5d4037",
@@ -134,17 +148,42 @@ function createRoadTexture(baseColor = "#444") {
 
 function createGroundTexture(baseColor = "#2e7d32") {
   const canvas = document.createElement("canvas");
-  canvas.width = 128; canvas.height = 128;
+  canvas.width = 256; canvas.height = 256;
   const ctx = canvas.getContext("2d");
-  ctx.fillStyle = baseColor;
-  ctx.fillRect(0, 0, 128, 128);
   const bc = parseInt(baseColor.replace("#",""), 16);
   const br = (bc >> 16) & 0xff, bg = (bc >> 8) & 0xff, bb = bc & 0xff;
-  for (let i = 0; i < 2000; i++) {
+  // Base gradient (slight variation across tile)
+  const grad = ctx.createRadialGradient(128, 128, 20, 128, 128, 180);
+  grad.addColorStop(0, `rgb(${clamp(br+10,0,255)},${clamp(bg+10,0,255)},${clamp(bb+10,0,255)})`);
+  grad.addColorStop(1, baseColor);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 256, 256);
+  // Layer 1: large soft blotches (soil patches)
+  for (let i = 0; i < 15; i++) {
+    const v = (Math.random() - 0.5) * 50;
+    ctx.fillStyle = `rgba(${clamp(br+v,0,255)|0},${clamp(bg+v-10,0,255)|0},${clamp(bb+v,0,255)|0},0.3)`;
+    ctx.beginPath();
+    ctx.ellipse(Math.random()*256, Math.random()*256, 10+Math.random()*30, 8+Math.random()*20, Math.random()*Math.PI, 0, Math.PI*2);
+    ctx.fill();
+  }
+  // Layer 2: fine grain noise (dirt/texture)
+  for (let i = 0; i < 3000; i++) {
     const v = (Math.random() - 0.5) * 40;
-    ctx.fillStyle = `rgba(${clamp(br+v,0,255)|0},${clamp(bg+v,0,255)|0},${clamp(bb+v,0,255)|0},0.5)`;
-    const s = 1 + Math.random() * 3;
-    ctx.fillRect(Math.random()*128, Math.random()*128, s, s);
+    ctx.fillStyle = `rgba(${clamp(br+v,0,255)|0},${clamp(bg+v,0,255)|0},${clamp(bb+v,0,255)|0},0.4)`;
+    const s = 1 + Math.random() * 2;
+    ctx.fillRect(Math.random()*256, Math.random()*256, s, s);
+  }
+  // Layer 3: grass blade strokes
+  for (let i = 0; i < 400; i++) {
+    const gv = (Math.random() - 0.3) * 30;
+    ctx.strokeStyle = `rgba(${clamp(br+gv,0,255)|0},${clamp(bg+gv+15,0,255)|0},${clamp(bb+gv,0,255)|0},0.35)`;
+    ctx.lineWidth = 0.5 + Math.random();
+    const gx = Math.random() * 256;
+    const gy = Math.random() * 256;
+    ctx.beginPath();
+    ctx.moveTo(gx, gy);
+    ctx.lineTo(gx + (Math.random()-0.5)*4, gy - 3 - Math.random()*5);
+    ctx.stroke();
   }
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
@@ -890,17 +929,24 @@ const Kart = React.forwardRef(function Kart({ color="#29b6f6", accent="#ffffff",
 // -----------------------------
 // 4 distinct car body designs
 // -----------------------------
-const paintMat = (color) => ({ color, metalness: 0.6, roughness: 0.3 });
-const darkGlass = { color: "#111", metalness: 0.8, roughness: 0.1 };
-const wheelMat = { color: "#222", metalness: 0.1, roughness: 0.9 };
-const accentMat = (c) => ({ color: c, metalness: 0.3, roughness: 0.5 });
+const paintMat = (color) => ({ color, metalness: 0.85, roughness: 0.15, envMapIntensity: 1.2 });
+const darkGlass = { color: "#1a2a3a", metalness: 0.95, roughness: 0.05, transparent: true, opacity: 0.7, envMapIntensity: 2.0 };
+const wheelMat = { color: "#1a1a1a", metalness: 0.4, roughness: 0.6 };
+const wheelRimMat = { color: "#888", metalness: 0.9, roughness: 0.1 };
+const accentMat = (c) => ({ color: c, metalness: 0.6, roughness: 0.25, envMapIntensity: 1.0 });
 
 function Wheel({ x, z, r = 0.22, w = 0.18 }) {
   return (
-    <mesh position={[x, r, z]} rotation={[0, 0, Math.PI / 2]} castShadow>
-      <cylinderGeometry args={[r, r, w, 16]} />
-      <meshStandardMaterial {...wheelMat} />
-    </mesh>
+    <group position={[x, r, z]}>
+      <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
+        <cylinderGeometry args={[r, r, w, 16]} />
+        <meshStandardMaterial {...wheelMat} />
+      </mesh>
+      <mesh rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[r * 0.6, r * 0.6, w + 0.02, 8]} />
+        <meshStandardMaterial {...wheelRimMat} />
+      </mesh>
+    </group>
   );
 }
 
@@ -1116,10 +1162,10 @@ function CameraRig({ targetRef }){
 // AI opponents
 // -----------------------------
 const AI_RACERS = [
-  { color: "#ef5da8", accent: "#fff", startT: 0.08, speedMul: 0.90, bodyType: "glider", offset: -2.5, tier: "challenger" },
-  { color: "#ffe082", accent: "#fff", startT: 0.16, speedMul: 0.97, bodyType: "torque", offset: 2.5, tier: "threat" },
-  { color: "#ff7043", accent: "#fff", startT: 0.24, speedMul: 0.78, bodyType: "bulldog", offset: -1.0, tier: "rookie" },
-  { color: "#8bc34a", accent: "#fff", startT: 0.32, speedMul: 0.85, bodyType: "sprinter", offset: 1.0, tier: "competitive" },
+  { color: "#ef5da8", accent: "#fff", startT: 0.08, speedMul: 0.95, bodyType: "glider", offset: -2.5, tier: "challenger" },
+  { color: "#ffe082", accent: "#fff", startT: 0.16, speedMul: 1.02, bodyType: "torque", offset: 2.5, tier: "threat" },
+  { color: "#ff7043", accent: "#fff", startT: 0.24, speedMul: 0.88, bodyType: "bulldog", offset: -1.0, tier: "rookie" },
+  { color: "#8bc34a", accent: "#fff", startT: 0.32, speedMul: 0.92, bodyType: "sprinter", offset: 1.0, tier: "competitive" },
 ];
 
 function AIKart({ color, accent="#fff", startT, speedMul=0.85, bodyType, offset=0, tier="competitive", curve, trackWidth, playerMaxSpeed=30 }) {
@@ -1173,7 +1219,7 @@ function AIKart({ color, accent="#fff", startT, speedMul=0.85, bodyType, offset=
     const playerProgress = (liveRace.playerLap - 1) + liveRace.playerT;
     const aiProgress = (lap.current - 1) + progress.current;
     const gap = aiProgress - playerProgress;
-    const rubberBand = clamp(1.0 - gap * 0.5, 0.6, 1.4);
+    const rubberBand = clamp(1.0 - gap * 0.3, 0.75, 1.3);
 
     // Curvature-based speed
     const t1 = progress.current;
@@ -1181,7 +1227,7 @@ function AIKart({ color, accent="#fff", startT, speedMul=0.85, bodyType, offset=
     const tang1 = curve.getTangentAt(t1);
     const tang2 = curve.getTangentAt(t2);
     const curvature = tang1.distanceTo(tang2) * 100;
-    const curveMul = tier === "threat" ? 1.8 : tier === "rookie" ? 3.5 : 2.5;
+    const curveMul = tier === "threat" ? 1.2 : tier === "rookie" ? 2.5 : 1.8;
     const cornerFactor = 1.0 / (1 + curvature * curveMul);
 
     const wobbleSpeed = 1 + Math.sin(state.clock.elapsedTime * 0.7 + wobble.current) * 0.06;
@@ -1204,8 +1250,13 @@ function AIKart({ color, accent="#fff", startT, speedMul=0.85, bodyType, offset=
     const tang = curve.getTangentAt(progress.current);
     const nx = -tang.z, nz = tang.x;
     const len = Math.hypot(nx, nz) || 1;
-    const overtakeOff = Math.sin(state.clock.elapsedTime * 0.5 + wobble.current * 2) * 2.5;
-    const sideOff = offset + Math.sin(state.clock.elapsedTime * 0.3 + wobble.current) * 1.5 + overtakeOff * 0.5;
+    // Dynamic lane changes — aggressive swerving and overtake attempts
+    const overtakeOff = Math.sin(state.clock.elapsedTime * 1.2 + wobble.current * 2) * 3.5;
+    const weaveOff = Math.sin(state.clock.elapsedTime * 0.7 + wobble.current) * 2.0;
+    // Actively move toward player's lane when close behind
+    const behindPlayer = (playerProgress - aiProgress) > 0 && (playerProgress - aiProgress) < 0.15;
+    const huntOffset = behindPlayer ? Math.sin(state.clock.elapsedTime * 2) * 3 : 0;
+    const sideOff = offset + weaveOff + overtakeOff * 0.6 + huntOffset;
     const clampedOff = clamp(sideOff, -trackWidth / 2 + 1.5, trackWidth / 2 - 1.5);
 
     if (ref.current) {
@@ -1381,15 +1432,20 @@ function ItemBoxes({ curve }) {
   useFrame((state) => {
     const time = state.clock.elapsedTime;
     for (let i = 0; i < boxRefs.current.length; i++) {
-      const m = boxRefs.current[i];
-      if (!m) continue;
+      const g = boxRefs.current[i];
+      if (!g) continue;
       const cd = liveRace.itemBoxCooldowns[i];
       const active = !cd || time >= cd;
-      m.visible = active;
+      g.visible = active;
       if (active) {
-        m.rotation.y = time * 1.5 + i;
-        m.rotation.x = time * 0.8 + i * 0.5;
-        m.position.y = 1.2 + Math.sin(time * 2 + i) * 0.3;
+        g.rotation.y = time * 2.0 + i;
+        g.rotation.x = time * 1.2 + i * 0.5;
+        // Bouncy bob: combination of fast + slow sine for lively feel
+        const bounce = Math.abs(Math.sin(time * 3 + i * 1.7)) * 0.4 + Math.sin(time * 1.5 + i) * 0.15;
+        g.position.y = 1.4 + bounce;
+        // Pulsing scale
+        const pulse = 1.0 + Math.sin(time * 4 + i * 2) * 0.08;
+        g.scale.setScalar(pulse);
       }
     }
   });
@@ -1397,10 +1453,23 @@ function ItemBoxes({ curve }) {
   return (
     <group ref={groupRef}>
       {boxPositions.map((pos, i) => (
-        <mesh key={i} ref={(el) => (boxRefs.current[i] = el)} position={pos}>
-          <boxGeometry args={[1.5, 1.5, 1.5]} />
-          <meshStandardMaterial color="#ffaa00" emissive="#ff6600" emissiveIntensity={0.6} transparent opacity={0.8} />
-        </mesh>
+        <group key={i} ref={(el) => (boxRefs.current[i] = el)} position={pos}>
+          {/* Solid shiny cube */}
+          <mesh>
+            <boxGeometry args={[1.5, 1.5, 1.5]} />
+            <meshStandardMaterial color="#ffcc00" metalness={0.9} roughness={0.1} envMapIntensity={1.5} />
+          </mesh>
+          {/* Inner glow core */}
+          <mesh>
+            <boxGeometry args={[1.0, 1.0, 1.0]} />
+            <meshStandardMaterial color="#ffffff" emissive="#ff8800" emissiveIntensity={1.2} transparent opacity={0.6} />
+          </mesh>
+          {/* Question mark face accent */}
+          <mesh position={[0, 0, 0.76]}>
+            <planeGeometry args={[0.6, 0.6]} />
+            <meshBasicMaterial color="#ffffff" transparent opacity={0.7} />
+          </mesh>
+        </group>
       ))}
     </group>
   );
@@ -1549,6 +1618,57 @@ function MiniMap({ curve }) {
 // -----------------------------
 // Race scene
 // -----------------------------
+// Distant layered backdrop scenery
+function BackdropMountains({ theme }) {
+  const mountains = useMemo(() => {
+    const arr = [];
+    const count = 24;
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2;
+      const dist = 180 + Math.random() * 40;
+      const h = 15 + Math.random() * 35;
+      const w = 20 + Math.random() * 30;
+      arr.push({ x: Math.cos(angle) * dist, z: Math.sin(angle) * dist, h, w, angle });
+    }
+    return arr;
+  }, []);
+
+  const midLayer = useMemo(() => {
+    const arr = [];
+    const count = 16;
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2 + 0.15;
+      const dist = 150 + Math.random() * 20;
+      const h = 8 + Math.random() * 15;
+      const w = 15 + Math.random() * 20;
+      arr.push({ x: Math.cos(angle) * dist, z: Math.sin(angle) * dist, h, w });
+    }
+    return arr;
+  }, []);
+
+  const farColor = theme === "city" ? "#0a0a1e" : theme === "west" ? "#8B6914" : "#1a5c1a";
+  const midColor = theme === "city" ? "#111133" : theme === "west" ? "#a07030" : "#2a6e2a";
+
+  return (
+    <group>
+      {/* Far mountain ring */}
+      {mountains.map((m, i) => (
+        <mesh key={`far-${i}`} position={[m.x, m.h * 0.4, m.z]}>
+          <coneGeometry args={[m.w, m.h, 5]} />
+          <meshStandardMaterial color={farColor} roughness={1} />
+        </mesh>
+      ))}
+      {/* Mid hills ring */}
+      {midLayer.map((m, i) => (
+        <mesh key={`mid-${i}`} position={[m.x, m.h * 0.35, m.z]}>
+          <coneGeometry args={[m.w, m.h, 4]} />
+          <meshStandardMaterial color={midColor} roughness={1} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 function RaceScene({ theme, character, car, platform, onFinish }){
   const kartRef = useRef();
   const controlRef = useRef({ left:false,right:false,up:false,down:false });
@@ -1620,6 +1740,7 @@ function RaceScene({ theme, character, car, platform, onFinish }){
 
         {/* Ground + Track */}
         <GroundPlane color={theme?.turf || "#1b5e20"} />
+        <BackdropMountains theme={theme.theme} />
         {curve && <TrackRoad curve={curve} trackWidth={trackWidth} roadColor={theme?.roadColor || "#555"} />}
         {curve && <TrackCurbs curve={curve} trackWidth={trackWidth} />}
         {curve && <TrackStartLine curve={curve} trackWidth={trackWidth} />}
@@ -1993,18 +2114,36 @@ function Stat({ label, v, max }){
 function TrackScreen(){
   const sel = useSafeSelection();
   const [laps, setL] = useState(sel.laps);
+  const [unlocked, setUnlocked] = useState(getUnlocked());
   useEffect(()=> setL(sel.laps), [sel.laps]);
+  useEffect(()=> setUnlocked(getUnlocked()), []);
+  const diffLabel = (d) => d === 1 ? "Easy" : d === 2 ? "Medium" : "Hard";
+  const diffColor = (d) => d === 1 ? "text-green-400" : d === 2 ? "text-yellow-400" : "text-red-400";
   return (
     <div className="h-full w-full flex flex-col">
       <StepIndicator step={3} />
       <div className="flex-1 overflow-y-auto min-h-0 px-4 sm:px-6 pb-4">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-          {TRACKS.map((t)=> (
-            <button key={t.id} onClick={()=> setTrack(t)} className={`rounded-2xl border px-4 py-4 text-left transition ${sel.track.id===t.id?"border-white bg-white/10":"border-white/20 bg-white/5 hover:bg-white/10"}`}>
-              <div className="font-semibold text-lg mb-2">{t.name}</div>
-              <TrackPreview track={t} />
-            </button>
-          ))}
+          {TRACKS.map((t)=> {
+            const isLocked = !unlocked[t.id];
+            return (
+              <button key={t.id} onClick={()=> { if (!isLocked) setTrack(t); }} className={`rounded-2xl border px-4 py-4 text-left transition relative ${isLocked ? "border-white/10 bg-white/5 opacity-50 cursor-not-allowed" : sel.track.id===t.id?"border-white bg-white/10":"border-white/20 bg-white/5 hover:bg-white/10"}`}>
+                {isLocked && (
+                  <div className="absolute inset-0 flex items-center justify-center z-10 rounded-2xl bg-black/40">
+                    <div className="text-center">
+                      <div className="text-2xl mb-1">🔒</div>
+                      <div className="text-xs text-white/60">Win previous track to unlock</div>
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-center justify-between mb-2">
+                  <div className="font-semibold text-lg">{t.name}</div>
+                  <div className={`text-xs font-medium ${diffColor(t.difficulty)}`}>{diffLabel(t.difficulty)}</div>
+                </div>
+                <TrackPreview track={t} />
+              </button>
+            );
+          })}
         </div>
         <div className="mb-2">
           <div className="mb-2 text-white/80">Laps: {laps}</div>
@@ -2068,9 +2207,13 @@ function Confetti() {
   );
 }
 
-function FinishScreen({ position }) {
+function FinishScreen({ position, trackId }) {
   const isWinner = position === 1;
   const isPodium = position <= 3;
+  // Unlock next track on win
+  useEffect(() => {
+    if (isWinner && trackId) unlockNext(trackId);
+  }, [isWinner, trackId]);
   const posText = position === 1 ? "1st" : position === 2 ? "2nd" : position === 3 ? "3rd" : `${position}th`;
   const borderColor = isWinner ? "border-yellow-400/60" : isPodium ? "border-white/30" : "border-white/20";
   const bgGrad = isWinner
@@ -2097,7 +2240,9 @@ function FinishScreen({ position }) {
           {posText} Place!
         </div>
         <div className={`text-lg mb-6 ${isWinner ? "text-yellow-100/90" : "text-white/70"}`}>
-          {isWinner ? "You won the race!" : isPodium ? "Great race! So close!" : "Better luck next time!"}
+          {isWinner ? (
+            <>You won the race!{trackId && TRACKS.findIndex(t=>t.id===trackId) < TRACKS.length - 1 && <span className="block text-sm mt-1 text-green-300">New track unlocked!</span>}</>
+          ) : isPodium ? "Great race! So close!" : "Better luck next time!"}
         </div>
         <div className="flex gap-3 justify-center flex-wrap">
           <button onClick={() => setScreen("track")} className="rounded-xl bg-white/10 border border-white/20 px-4 py-2 hover:bg-white/20 transition">Change Track</button>
@@ -2117,7 +2262,7 @@ function RaceScreen(){
   return (
     <div className="h-full w-full">
       <RaceScene theme={track || TRACKS[0]} character={character || CHARACTERS[0]} car={car || CARS[0]} platform={platform} onFinish={()=> setFinished(true)} />
-      {finished && <FinishScreen position={liveRace.position} />}
+      {finished && <FinishScreen position={liveRace.position} trackId={track?.id} />}
     </div>
   );
 }
