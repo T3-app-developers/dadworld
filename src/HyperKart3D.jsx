@@ -253,10 +253,48 @@ function getCrossTrackOffset(curve, pos, t) {
   return (dx * (nx / len) + dz * (nz / len));
 }
 
+// -----------------------------
+// Items & Power-ups
+// -----------------------------
+const ITEMS = [
+  { id: "mushroom", name: "Mushroom", display: "BOOST" },
+  { id: "banana", name: "Banana", display: "BANANA" },
+  { id: "missile", name: "Missile", display: "MISSILE" },
+  { id: "shield", name: "Shield", display: "SHIELD" },
+  { id: "lightning", name: "Lightning", display: "ZAP" },
+];
+
+const ITEM_WEIGHTS = {
+  1: [30, 20, 10, 40, 0],
+  2: [30, 20, 25, 20, 5],
+  3: [25, 15, 30, 10, 20],
+  4: [15, 10, 30, 5, 40],
+  5: [15, 10, 30, 5, 40],
+};
+
+function getRandomItem(position) {
+  const weights = ITEM_WEIGHTS[clamp(position, 1, 5)];
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  for (let i = 0; i < weights.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return ITEMS[i].id;
+  }
+  return ITEMS[0].id;
+}
+
 // Module-level shared race data (written by physics loop, read by HUD)
 const liveRace = {
   playerT: 0, playerPos: [0, 0], playerLap: 1, playerYaw: 0,
   ai: [], position: 1, drifting: false, totalLaps: DEFAULT_LAPS,
+  // Item system
+  playerItem: null,
+  playerShield: false,
+  playerSpinout: 0,
+  lightningTimer: 0,
+  activeBananas: [],
+  activeMissiles: [],
+  itemBoxCooldowns: {},
 };
 
 // -----------------------------
@@ -332,7 +370,7 @@ function useSafeSelection(){
 // Keyboard & Touch controls
 // -----------------------------
 function useKeyboardControls(enabled) {
-  const [keys, setKeys] = useState({ left: false, right: false, up: false, down: false });
+  const [keys, setKeys] = useState({ left: false, right: false, up: false, down: false, useItem: false });
   useEffect(() => {
     if (!enabled) return;
     const down = (e) => {
@@ -340,6 +378,7 @@ function useKeyboardControls(enabled) {
       if (["ArrowRight", "d", "D"].includes(e.key)) setKeys((k) => ({ ...k, right: true }));
       if (["ArrowUp", "w", "W"].includes(e.key)) setKeys((k) => ({ ...k, up: true }));
       if (["ArrowDown", "s", "S"].includes(e.key)) setKeys((k) => ({ ...k, down: true }));
+      if (e.key === " ") { e.preventDefault(); setKeys((k) => ({ ...k, useItem: true })); }
       if (e.key === "Escape" || e.key === "p" || e.key === "P") setShowSettings(true);
     };
     const up = (e) => {
@@ -347,6 +386,7 @@ function useKeyboardControls(enabled) {
       if (["ArrowRight", "d", "D"].includes(e.key)) setKeys((k) => ({ ...k, right: false }));
       if (["ArrowUp", "w", "W"].includes(e.key)) setKeys((k) => ({ ...k, up: false }));
       if (["ArrowDown", "s", "S"].includes(e.key)) setKeys((k) => ({ ...k, down: false }));
+      if (e.key === " ") setKeys((k) => ({ ...k, useItem: false }));
     };
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
@@ -356,7 +396,7 @@ function useKeyboardControls(enabled) {
 }
 
 function TouchPad({ onChange }) {
-  const [state, setState] = useState({ left: false, right: false, up: false, down: false });
+  const [state, setState] = useState({ left: false, right: false, up: false, down: false, useItem: false });
   useEffect(() => { onChange && onChange(state); }, [state, onChange]);
   const mkHandlers = (key) => ({
     onPointerDown: (e) => { e.preventDefault(); setState((s) => ({ ...s, [key]: true })); },
@@ -369,6 +409,7 @@ function TouchPad({ onChange }) {
         <button {...mkHandlers("left")} className={`h-16 w-16 rounded-full bg-white/10 backdrop-blur border border-white/20 ${state.left ? "ring-4 ring-white/60" : ""}`}>◀</button>
         <button {...mkHandlers("right")} className={`h-16 w-16 rounded-full bg-white/10 backdrop-blur border border-white/20 ${state.right ? "ring-4 ring-white/60" : ""}`}>▶</button>
       </div>
+      <button {...mkHandlers("useItem")} className={`h-14 w-14 rounded-full bg-yellow-500/30 backdrop-blur border-2 border-yellow-400/50 text-xs font-bold ${state.useItem ? "ring-4 ring-yellow-400/60" : ""}`}>USE</button>
       <div className="flex gap-3">
         <button {...mkHandlers("up")} className={`h-16 w-16 rounded-full bg-white/10 backdrop-blur border border-white/20 ${state.up ? "ring-4 ring-white/60" : ""}`}>▲</button>
         <button {...mkHandlers("down")} className={`h-16 w-16 rounded-full bg-white/10 backdrop-blur border border-white/20 ${state.down ? "ring-4 ring-white/60" : ""}`}>▼</button>
@@ -585,14 +626,50 @@ const Kart = React.forwardRef(function Kart({ color="#29b6f6", accent="#ffffff",
   const driftDir = useRef(0);
   // Init flag
   const inited = useRef(false);
+  // Item state
+  const itemUsed = useRef(false);
+  const spinoutTimer = useRef(0);
+  const spinoutYawRate = useRef(0);
 
   useFrame((state, dt) => {
     if (dt > 0.05) dt = 0.05;
     if (!curve) return;
-    const controls = controlRef.current || { left: false, right: false, up: false, down: false };
+    const controls = controlRef.current || { left: false, right: false, up: false, down: false, useItem: false };
     const maxSpeed = carStats.maxSpeed;
     const handling = carStats.handling;
     const hw = (trackWidth || 10) / 2;
+
+    // --- Check if AI lightning hit us ---
+    if (liveRace.playerSpinout > 0 && spinoutTimer.current <= 0) {
+      if (liveRace.playerShield) { liveRace.playerShield = false; }
+      else {
+        spinoutTimer.current = liveRace.playerSpinout;
+        spinoutYawRate.current = (Math.random() > 0.5 ? 1 : -1) * 8;
+        vel.current = 0;
+      }
+      liveRace.playerSpinout = 0;
+    }
+
+    // --- Spin-out (from item hit) ---
+    if (spinoutTimer.current > 0) {
+      spinoutTimer.current -= dt;
+      vel.current *= 0.9;
+      yaw.current += spinoutYawRate.current * dt;
+      pos.current.x += Math.cos(yaw.current) * vel.current * dt;
+      pos.current.z += Math.sin(yaw.current) * vel.current * dt;
+      liveRace.playerT = findNearestT(curve, pos.current, trackT.current);
+      liveRace.playerPos = [pos.current.x, pos.current.z];
+      liveRace.playerSpinout = spinoutTimer.current;
+      if (group.current) {
+        group.current.position.copy(pos.current);
+        group.current.rotation.y = -yaw.current - Math.PI / 2;
+      }
+      return; // skip normal controls during spin-out
+    }
+    liveRace.playerSpinout = 0;
+
+    // --- Lightning slowdown ---
+    const lightningMul = liveRace.lightningTimer > 0 ? 0.5 : 1.0;
 
     // Init start position from curve
     if (!inited.current) {
@@ -648,7 +725,7 @@ const Kart = React.forwardRef(function Kart({ color="#29b6f6", accent="#ffffff",
     if (controls.down && !drifting.current) {
       vel.current -= carStats.accel * 0.9 * dt; // brake
     }
-    vel.current = clamp(vel.current, -maxSpeed * 0.3, maxSpeed);
+    vel.current = clamp(vel.current, -maxSpeed * 0.3, maxSpeed * lightningMul);
 
     // --- Integrate position ---
     pos.current.x += Math.cos(yaw.current) * vel.current * dt;
@@ -695,6 +772,72 @@ const Kart = React.forwardRef(function Kart({ color="#29b6f6", accent="#ffffff",
       }
     }
 
+    // --- Item box pickup ---
+    if (!liveRace.playerItem) {
+      const numBoxes = 8;
+      for (let bi = 0; bi < numBoxes; bi++) {
+        const boxT = (bi + 0.5) / numBoxes;
+        const cd = liveRace.itemBoxCooldowns[bi];
+        if (cd && state.clock.elapsedTime < cd) continue;
+        const bp = curve.getPointAt(boxT);
+        if (Math.hypot(pos.current.x - bp.x, pos.current.z - bp.z) < 3) {
+          liveRace.playerItem = getRandomItem(liveRace.position);
+          liveRace.itemBoxCooldowns[bi] = state.clock.elapsedTime + 5;
+        }
+      }
+    }
+
+    // --- Use item ---
+    if (controls.useItem && liveRace.playerItem && !itemUsed.current) {
+      itemUsed.current = true;
+      const item = liveRace.playerItem;
+      liveRace.playerItem = null;
+      if (item === "mushroom") {
+        vel.current = Math.min(maxSpeed * 1.4, vel.current + maxSpeed * 0.5);
+      } else if (item === "banana") {
+        liveRace.activeBananas.push({ x: pos.current.x, z: pos.current.z, owner: "player", spawnTime: state.clock.elapsedTime });
+      } else if (item === "missile") {
+        liveRace.activeMissiles.push({ t: trackT.current, speed: maxSpeed * 2, owner: "player", spawnTime: state.clock.elapsedTime, hitIdx: -1 });
+      } else if (item === "shield") {
+        liveRace.playerShield = true;
+        setTimeout(() => { liveRace.playerShield = false; }, 10000);
+      } else if (item === "lightning") {
+        liveRace.lightningTimer = 2.0;
+        for (const ai of liveRace.ai) { ai.spinout = 1.0; }
+      }
+    }
+    if (!controls.useItem) itemUsed.current = false;
+
+    // --- Check banana collision (player hits bananas placed by AI) ---
+    for (let bi = liveRace.activeBananas.length - 1; bi >= 0; bi--) {
+      const b = liveRace.activeBananas[bi];
+      if (b.owner === "player") continue;
+      if (Math.hypot(pos.current.x - b.x, pos.current.z - b.z) < 2) {
+        liveRace.activeBananas.splice(bi, 1);
+        if (liveRace.playerShield) { liveRace.playerShield = false; continue; }
+        vel.current = 0;
+        spinoutTimer.current = 1.0;
+        spinoutYawRate.current = (Math.random() > 0.5 ? 1 : -1) * 8;
+      }
+    }
+
+    // --- Check missile collision (missiles targeting player) ---
+    for (let mi = liveRace.activeMissiles.length - 1; mi >= 0; mi--) {
+      const m = liveRace.activeMissiles[mi];
+      if (m.owner === "player") continue;
+      const mp = curve.getPointAt(m.t);
+      if (Math.hypot(pos.current.x - mp.x, pos.current.z - mp.z) < 3) {
+        liveRace.activeMissiles.splice(mi, 1);
+        if (liveRace.playerShield) { liveRace.playerShield = false; continue; }
+        vel.current = 0;
+        spinoutTimer.current = 1.2;
+        spinoutYawRate.current = (Math.random() > 0.5 ? 1 : -1) * 10;
+      }
+    }
+
+    // --- Decrement lightning timer ---
+    if (liveRace.lightningTimer > 0) liveRace.lightningTimer -= dt;
+
     // --- Lap counting ---
     // Set checkpoint when crossing the halfway point (t ≈ 0.5)
     if (prevT.current < 0.5 && trackT.current >= 0.5) {
@@ -739,6 +882,7 @@ const Kart = React.forwardRef(function Kart({ color="#29b6f6", accent="#ffffff",
   return (
     <group ref={attachRef}>
       <KartBody bodyType={carStats.id} color={color} accent={accent} />
+      <ShieldBubble owner="player" />
     </group>
   );
 });
@@ -985,26 +1129,53 @@ function AIKart({ color, accent="#fff", startT, speedMul=0.85, bodyType, offset=
   const prevT = useRef(startT);
   const wobble = useRef(Math.random() * Math.PI * 2);
   const aiIndex = useRef(-1);
+  const aiItem = useRef(null);
+  const aiItemDelay = useRef(0);
+  const aiShield = useRef(false);
+  const aiSpinout = useRef(0);
+  const aiSpinYaw = useRef(0);
+  const aiYaw = useRef(0);
 
   useEffect(() => {
     const idx = liveRace.ai.length;
     aiIndex.current = idx;
-    liveRace.ai.push({ t: startT, lap: 1, pos: [0, 0], color });
+    liveRace.ai.push({ t: startT, lap: 1, pos: [0, 0], color, spinout: 0 });
   }, []);
 
   useFrame((state, dt) => {
     if (dt > 0.05) dt = 0.05;
     if (!curve) return;
+    const idx = aiIndex.current;
     const curveLen = curve.getLength();
     const baseSpeed = speedMul * playerMaxSpeed;
+    const posX = ref.current?.position.x || 0;
+    const posZ = ref.current?.position.z || 0;
 
-    // Smooth rubber banding: proportional to gap
+    // Check for lightning hit from player
+    if (idx >= 0 && idx < liveRace.ai.length && liveRace.ai[idx].spinout > 0) {
+      aiSpinout.current = liveRace.ai[idx].spinout;
+      aiSpinYaw.current = (Math.random() > 0.5 ? 1 : -1) * 6;
+      liveRace.ai[idx].spinout = 0;
+    }
+
+    // Spin-out state
+    if (aiSpinout.current > 0) {
+      aiSpinout.current -= dt;
+      aiYaw.current += aiSpinYaw.current * dt;
+      if (ref.current) ref.current.rotation.y = aiYaw.current;
+      return;
+    }
+
+    // Lightning slowdown
+    const lightningMul = liveRace.lightningTimer > 0 ? 0.5 : 1.0;
+
+    // Smooth rubber banding
     const playerProgress = (liveRace.playerLap - 1) + liveRace.playerT;
     const aiProgress = (lap.current - 1) + progress.current;
     const gap = aiProgress - playerProgress;
     const rubberBand = clamp(1.0 - gap * 0.5, 0.6, 1.4);
 
-    // Curvature-based speed: tier determines corner skill
+    // Curvature-based speed
     const t1 = progress.current;
     const t2 = (t1 + 0.01) % 1;
     const tang1 = curve.getTangentAt(t1);
@@ -1013,21 +1184,17 @@ function AIKart({ color, accent="#fff", startT, speedMul=0.85, bodyType, offset=
     const curveMul = tier === "threat" ? 1.8 : tier === "rookie" ? 3.5 : 2.5;
     const cornerFactor = 1.0 / (1 + curvature * curveMul);
 
-    // Speed with wobble
     const wobbleSpeed = 1 + Math.sin(state.clock.elapsedTime * 0.7 + wobble.current) * 0.06;
-
-    // Light random mistakes (20% slowdown for 0.2s every 8-12 seconds)
     const mistakeCycle = 8 + wobble.current * 1.3;
     const timeMod = state.clock.elapsedTime % mistakeCycle;
     const mistakeFactor = (timeMod < 0.2) ? 0.8 : 1.0;
 
-    const actualSpeed = baseSpeed * rubberBand * cornerFactor * wobbleSpeed * mistakeFactor;
+    const actualSpeed = baseSpeed * rubberBand * cornerFactor * wobbleSpeed * mistakeFactor * lightningMul;
     const tDelta = (actualSpeed * dt) / curveLen;
 
     prevT.current = progress.current;
     progress.current = (progress.current + tDelta) % 1;
 
-    // Lap detection: wrapped past 0
     if (prevT.current > 0.9 && progress.current < 0.1) {
       lap.current += 1;
     }
@@ -1037,7 +1204,6 @@ function AIKart({ color, accent="#fff", startT, speedMul=0.85, bodyType, offset=
     const tang = curve.getTangentAt(progress.current);
     const nx = -tang.z, nz = tang.x;
     const len = Math.hypot(nx, nz) || 1;
-    // Dynamic lane changes — swerve to overtake
     const overtakeOff = Math.sin(state.clock.elapsedTime * 0.5 + wobble.current * 2) * 2.5;
     const sideOff = offset + Math.sin(state.clock.elapsedTime * 0.3 + wobble.current) * 1.5 + overtakeOff * 0.5;
     const clampedOff = clamp(sideOff, -trackWidth / 2 + 1.5, trackWidth / 2 - 1.5);
@@ -1045,11 +1211,81 @@ function AIKart({ color, accent="#fff", startT, speedMul=0.85, bodyType, offset=
     if (ref.current) {
       ref.current.position.set(p.x + (nx / len) * clampedOff, 0.35, p.z + (nz / len) * clampedOff);
       ref.current.rotation.y = Math.atan2(-tang.x, -tang.z);
+      aiYaw.current = ref.current.rotation.y;
+    }
+
+    // --- AI Item pickup ---
+    if (!aiItem.current) {
+      const numBoxes = 8;
+      for (let bi = 0; bi < numBoxes; bi++) {
+        const boxT = (bi + 0.5) / numBoxes;
+        const cd = liveRace.itemBoxCooldowns[bi];
+        if (cd && state.clock.elapsedTime < cd) continue;
+        const bp = curve.getPointAt(boxT);
+        if (Math.hypot(posX - bp.x, posZ - bp.z) < 3) {
+          const aiPos = 1 + liveRace.ai.filter((a, ai2) => ai2 !== idx && ((a.lap - 1) + a.t) > aiProgress).length;
+          aiItem.current = getRandomItem(aiPos);
+          aiItemDelay.current = 1 + Math.random() * 2;
+          liveRace.itemBoxCooldowns[bi] = state.clock.elapsedTime + 5;
+        }
+      }
+    }
+
+    // --- AI Item usage ---
+    if (aiItem.current) {
+      aiItemDelay.current -= dt;
+      if (aiItemDelay.current <= 0) {
+        const item = aiItem.current;
+        aiItem.current = null;
+        if (item === "mushroom") {
+          // Boost: advance progress
+          progress.current = (progress.current + 0.02) % 1;
+        } else if (item === "banana") {
+          liveRace.activeBananas.push({ x: posX, z: posZ, owner: "ai", spawnTime: state.clock.elapsedTime });
+        } else if (item === "missile") {
+          liveRace.activeMissiles.push({ t: progress.current, speed: playerMaxSpeed * 2, owner: "ai", spawnTime: state.clock.elapsedTime, hitIdx: -1 });
+        } else if (item === "shield") {
+          aiShield.current = true;
+          setTimeout(() => { aiShield.current = false; }, 10000);
+        } else if (item === "lightning") {
+          // AI lightning: spin out player + other AIs
+          if (liveRace.playerShield) { liveRace.playerShield = false; }
+          else {
+            liveRace.playerSpinout = 1.0;
+            // Set spinout on player kart via liveRace flag (handled in next frame)
+          }
+        }
+      }
+    }
+
+    // --- AI banana collision (hits player-dropped bananas) ---
+    for (let bi = liveRace.activeBananas.length - 1; bi >= 0; bi--) {
+      const b = liveRace.activeBananas[bi];
+      if (b.owner === "ai") continue;
+      if (Math.hypot(posX - b.x, posZ - b.z) < 2) {
+        liveRace.activeBananas.splice(bi, 1);
+        if (aiShield.current) { aiShield.current = false; continue; }
+        aiSpinout.current = 1.0;
+        aiSpinYaw.current = (Math.random() > 0.5 ? 1 : -1) * 8;
+      }
+    }
+
+    // --- AI missile collision (player missiles hitting this AI) ---
+    for (let mi = liveRace.activeMissiles.length - 1; mi >= 0; mi--) {
+      const m = liveRace.activeMissiles[mi];
+      if (m.owner === "ai") continue;
+      const mp = curve.getPointAt(m.t);
+      if (Math.hypot(posX - mp.x, posZ - mp.z) < 3) {
+        liveRace.activeMissiles.splice(mi, 1);
+        if (aiShield.current) { aiShield.current = false; continue; }
+        aiSpinout.current = 1.2;
+        aiSpinYaw.current = (Math.random() > 0.5 ? 1 : -1) * 10;
+      }
     }
 
     // Update shared race data
-    if (aiIndex.current >= 0 && aiIndex.current < liveRace.ai.length) {
-      liveRace.ai[aiIndex.current] = { t: progress.current, lap: lap.current, pos: [ref.current?.position.x || 0, ref.current?.position.z || 0], color };
+    if (idx >= 0 && idx < liveRace.ai.length) {
+      liveRace.ai[idx] = { t: progress.current, lap: lap.current, pos: [posX, posZ], color, spinout: 0 };
     }
   });
 
@@ -1126,8 +1362,124 @@ const racingMusic = {
 };
 
 // -----------------------------
-// Scene wrapper
+// Item 3D entities
 // -----------------------------
+function ItemBoxes({ curve }) {
+  const numBoxes = 8;
+  const groupRef = useRef();
+  const boxRefs = useRef([]);
+
+  const boxPositions = useMemo(() => {
+    if (!curve) return [];
+    return Array.from({ length: numBoxes }, (_, i) => {
+      const t = (i + 0.5) / numBoxes;
+      const p = curve.getPointAt(t);
+      return [p.x, 1.2, p.z];
+    });
+  }, [curve]);
+
+  useFrame((state) => {
+    const time = state.clock.elapsedTime;
+    for (let i = 0; i < boxRefs.current.length; i++) {
+      const m = boxRefs.current[i];
+      if (!m) continue;
+      const cd = liveRace.itemBoxCooldowns[i];
+      const active = !cd || time >= cd;
+      m.visible = active;
+      if (active) {
+        m.rotation.y = time * 1.5 + i;
+        m.rotation.x = time * 0.8 + i * 0.5;
+        m.position.y = 1.2 + Math.sin(time * 2 + i) * 0.3;
+      }
+    }
+  });
+
+  return (
+    <group ref={groupRef}>
+      {boxPositions.map((pos, i) => (
+        <mesh key={i} ref={(el) => (boxRefs.current[i] = el)} position={pos}>
+          <boxGeometry args={[1.5, 1.5, 1.5]} />
+          <meshStandardMaterial color="#ffaa00" emissive="#ff6600" emissiveIntensity={0.6} transparent opacity={0.8} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function BananaHazards() {
+  const [, forceUpdate] = useState(0);
+  useFrame((state) => {
+    // Expire old bananas
+    for (let i = liveRace.activeBananas.length - 1; i >= 0; i--) {
+      if (state.clock.elapsedTime - liveRace.activeBananas[i].spawnTime > 15) {
+        liveRace.activeBananas.splice(i, 1);
+      }
+    }
+    forceUpdate((v) => v + 1);
+  });
+
+  return (
+    <group>
+      {liveRace.activeBananas.map((b, i) => (
+        <mesh key={`${i}-${b.spawnTime}`} position={[b.x, 0.4, b.z]}>
+          <sphereGeometry args={[0.5, 8, 8]} />
+          <meshStandardMaterial color="#ffd700" emissive="#ffaa00" emissiveIntensity={0.3} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function MissileEntities({ curve }) {
+  const [, forceUpdate] = useState(0);
+
+  useFrame((state, dt) => {
+    if (!curve) return;
+    const curveLen = curve.getLength();
+    for (let i = liveRace.activeMissiles.length - 1; i >= 0; i--) {
+      const m = liveRace.activeMissiles[i];
+      const tDelta = (m.speed * dt) / curveLen;
+      m.t = (m.t + tDelta) % 1;
+      // Expire after 6 seconds
+      if (state.clock.elapsedTime - m.spawnTime > 6) {
+        liveRace.activeMissiles.splice(i, 1);
+      }
+    }
+    forceUpdate((v) => v + 1);
+  });
+
+  if (!curve) return null;
+  return (
+    <group>
+      {liveRace.activeMissiles.map((m, i) => {
+        const p = curve.getPointAt(m.t);
+        const tang = curve.getTangentAt(m.t);
+        return (
+          <mesh key={`${i}-${m.spawnTime}`} position={[p.x, 0.8, p.z]} rotation={[0, Math.atan2(-tang.x, -tang.z), 0]}>
+            <boxGeometry args={[0.4, 0.4, 1.5]} />
+            <meshStandardMaterial color="#ff2222" emissive="#ff0000" emissiveIntensity={0.8} />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+function ShieldBubble({ owner }) {
+  const ref = useRef();
+  useFrame(() => {
+    if (!ref.current) return;
+    const active = owner === "player" ? liveRace.playerShield : false;
+    ref.current.visible = active;
+  });
+  return (
+    <mesh ref={ref}>
+      <sphereGeometry args={[2, 16, 12]} />
+      <meshStandardMaterial color="#00ccff" transparent opacity={0.15} wireframe />
+    </mesh>
+  );
+}
+
 // -----------------------------
 // HUD: Position display + Mini-map
 // -----------------------------
@@ -1215,6 +1567,13 @@ function RaceScene({ theme, character, car, platform, onFinish }){
     liveRace.playerT = 0;
     liveRace.playerLap = 1;
     liveRace.position = 1;
+    liveRace.playerItem = null;
+    liveRace.playerShield = false;
+    liveRace.playerSpinout = 0;
+    liveRace.lightningTimer = 0;
+    liveRace.activeBananas = [];
+    liveRace.activeMissiles = [];
+    liveRace.itemBoxCooldowns = {};
     useRaceSetter()({ currentLap: 1, totalLaps: useStore.get().laps, finished: false, position: 1 });
   }, []);
 
@@ -1280,6 +1639,11 @@ function RaceScene({ theme, character, car, platform, onFinish }){
           <AIKart key={i} color={ai.color} accent={ai.accent} startT={ai.startT} speedMul={ai.speedMul} bodyType={ai.bodyType} offset={ai.offset} tier={ai.tier} curve={curve} trackWidth={trackWidth} playerMaxSpeed={car?.maxSpeed || 30} />
         ))}
 
+        {/* Item entities */}
+        {curve && <ItemBoxes curve={curve} />}
+        <BananaHazards />
+        {curve && <MissileEntities curve={curve} />}
+
         {theme.theme !== "classic" && <StarsField count={1000} radius={250} />}
       </Canvas>
 
@@ -1291,8 +1655,11 @@ function RaceScene({ theme, character, car, platform, onFinish }){
       <PositionHUD />
       {curve && <MiniMap curve={curve} />}
 
-      {/* Drift indicator */}
+      {/* Drift indicator + Item HUD + Effects */}
       <DriftIndicator />
+      <ItemHUD />
+      <SpinOutIndicator />
+      <LightningFlash />
 
       {/* Touch controls overlay */}
       {(platform === "iPad" || platform === "iPhone") && (
@@ -1312,6 +1679,54 @@ function DriftIndicator() {
   return (
     <div className="pointer-events-none absolute bottom-32 left-1/2 -translate-x-1/2 text-center">
       <div className="text-lg font-bold text-cyan-400 animate-pulse">DRIFT</div>
+    </div>
+  );
+}
+
+function ItemHUD() {
+  const [item, setItem] = useState(null);
+  useEffect(() => {
+    const id = setInterval(() => setItem(liveRace.playerItem), 100);
+    return () => clearInterval(id);
+  }, []);
+  if (!item) return null;
+  const info = ITEMS.find((i) => i.id === item);
+  const colors = { mushroom: "bg-green-500/80", banana: "bg-yellow-500/80", missile: "bg-red-500/80", shield: "bg-cyan-500/80", lightning: "bg-purple-500/80" };
+  return (
+    <div className="pointer-events-none absolute top-20 left-4">
+      <div className={`${colors[item] || "bg-white/20"} rounded-xl px-4 py-2 text-center border border-white/30`}>
+        <div className="text-xs uppercase tracking-wider text-white/70">Item</div>
+        <div className="text-lg font-bold">{info?.display || item}</div>
+        <div className="text-xs text-white/50 mt-0.5">Space to use</div>
+      </div>
+    </div>
+  );
+}
+
+function SpinOutIndicator() {
+  const [active, setActive] = useState(false);
+  useEffect(() => {
+    const id = setInterval(() => setActive(liveRace.playerSpinout > 0), 50);
+    return () => clearInterval(id);
+  }, []);
+  if (!active) return null;
+  return (
+    <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+      <div className="text-3xl font-black text-red-400 animate-pulse">SPIN OUT!</div>
+    </div>
+  );
+}
+
+function LightningFlash() {
+  const [flash, setFlash] = useState(false);
+  useEffect(() => {
+    const id = setInterval(() => setFlash(liveRace.lightningTimer > 1.5), 50);
+    return () => clearInterval(id);
+  }, []);
+  if (!flash) return null;
+  return (
+    <div className="pointer-events-none absolute inset-0 bg-white/30 z-10" style={{ animation: "fadeOut 0.5s ease-out forwards" }}>
+      <style>{`@keyframes fadeOut { 0% { opacity: 1; } 100% { opacity: 0; } }`}</style>
     </div>
   );
 }
@@ -1474,11 +1889,24 @@ function HowToPlayScreen(){
             <p className="text-white/80">Hold <span className="font-semibold text-white">Brake + Steer</span> while moving fast to enter a drift. Release to get a speed boost! The longer you drift, the bigger the boost.</p>
           </div>
           <div>
+            <h3 className="text-lg font-bold mb-2 text-indigo-300">Items</h3>
+            <p className="text-white/80 mb-2">Drive through <span className="font-semibold text-yellow-300">glowing item boxes</span> on the track to pick up a random item. Press <span className="font-semibold text-white">Spacebar</span> to use it!</p>
+            <ul className="list-disc list-inside text-white/80 space-y-1">
+              <li><span className="text-green-300 font-semibold">Mushroom</span> — Instant speed boost</li>
+              <li><span className="text-yellow-300 font-semibold">Banana</span> — Drop behind you; spins out anyone who hits it</li>
+              <li><span className="text-red-300 font-semibold">Missile</span> — Fires forward along the track, hits the first kart ahead</li>
+              <li><span className="text-cyan-300 font-semibold">Shield</span> — Blocks one incoming hit for 10 seconds</li>
+              <li><span className="text-purple-300 font-semibold">Lightning</span> — Zaps ALL opponents, slowing them down</li>
+            </ul>
+            <p className="text-white/60 text-sm mt-1">Trailing racers get stronger items — comebacks are always possible!</p>
+          </div>
+          <div>
             <h3 className="text-lg font-bold mb-2 text-indigo-300">Tips</h3>
             <ul className="list-disc list-inside text-white/80 space-y-1">
               <li>Stay on the track — going off-road pushes you back and slows you down</li>
               <li>Use drifts on corners for massive speed boosts</li>
               <li>Hit boost pads on the track for extra speed</li>
+              <li>Pick up items to gain an edge or defend yourself</li>
               <li>Each car has different stats — experiment to find your favorite</li>
             </ul>
           </div>
@@ -1780,6 +2208,26 @@ test("makeSafeSelection() returns defaults for bad input", ()=>{
 test("TRACKS has classic/city/west", ()=>{
   const ids = new Set(TRACKS.map(t=>t.id));
   ["classic","city","west"].forEach(id=>{ if(!ids.has(id)) throw new Error(`missing track ${id}`); });
+});
+
+test("ITEMS has 5 items with ids", ()=>{
+  if(ITEMS.length !== 5) throw new Error(`expected 5 items, got ${ITEMS.length}`);
+  ["mushroom","banana","missile","shield","lightning"].forEach(id=>{
+    if(!ITEMS.find(i=>i.id===id)) throw new Error(`missing item ${id}`);
+  });
+});
+
+test("getRandomItem returns valid item id", ()=>{
+  for(let pos=1; pos<=5; pos++){
+    const id = getRandomItem(pos);
+    if(!ITEMS.find(i=>i.id===id)) throw new Error(`invalid item id "${id}" for position ${pos}`);
+  }
+});
+
+test("liveRace has item system fields", ()=>{
+  if(!Array.isArray(liveRace.activeBananas)) throw new Error("activeBananas not array");
+  if(!Array.isArray(liveRace.activeMissiles)) throw new Error("activeMissiles not array");
+  if(typeof liveRace.itemBoxCooldowns !== "object") throw new Error("itemBoxCooldowns not object");
 });
 
 function DevTestOverlay(){
